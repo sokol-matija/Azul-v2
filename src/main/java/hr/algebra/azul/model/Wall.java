@@ -164,6 +164,11 @@ public class Wall {
         return tiles;
     }
 
+    // New method to get the color from the wall pattern
+    public static TileColor getWallPatternColor(int row, int col) {
+        return wallPattern[row][col];
+    }
+
     // For debugging or display purposes
     @Override
     public String toString() {

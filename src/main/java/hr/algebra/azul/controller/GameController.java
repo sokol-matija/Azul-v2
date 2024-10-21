@@ -113,8 +113,7 @@ public class GameController {
                 if (j < patternLine.size()) {
                     tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
                 } else {
-                    Color emptyColor = getTileColor(TileColor.values()[i]).deriveColor(0, 1, 1, 0.5);
-                    tileRect.setFill(emptyColor);
+                    tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1)); // 50% darker white for empty pattern line slots
                 }
                 int finalI = i;
                 tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalI));
@@ -123,13 +122,15 @@ public class GameController {
         }
 
         // Add wall
+        Wall wall = player.getWall();
         for (int i = 0; i < 5; i++) {
             for (int j = 0; j < 5; j++) {
                 Rectangle tileRect = new Rectangle(20, 20);
-                if (player.getWall().hasTile(i, j)) {
-                    tileRect.setFill(getTileColor(player.getWall().getTileColor(i, j)));
+                if (wall.hasTile(i, j)) {
+                    tileRect.setFill(getTileColor(wall.getTileColor(i, j)));
                 } else {
-                    Color emptyColor = getTileColor(TileColor.values()[j]).deriveColor(0, 1, 1, 0.5);
+                    TileColor wallPatternColor = Wall.getWallPatternColor(i, j);
+                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 1);
                     tileRect.setFill(emptyColor);
                 }
                 playerBoard.add(tileRect, j + 6, i + 1);
@@ -246,14 +247,12 @@ public class GameController {
     @FXML
     private void onSaveGame() {
         // TODO: Implement save game functionality
-        // This is a placeholder. You'll need to implement the actual saving mechanism.
         showAlert("Save Game", "Game saved successfully!");
     }
 
     @FXML
     private void onLoadGame() {
         // TODO: Implement load game functionality
-        // This is a placeholder. You'll need to implement the actual loading mechanism.
         showAlert("Load Game", "Game loaded successfully!");
         updateView();
     }
@@ -269,11 +268,6 @@ public class GameController {
             showAlert("Game Over", "The game has ended. " + winner.getName() + " wins with " + winner.getScore() + " points!");
             // TODO: Implement any post-game actions (e.g., resetting the game, showing final scores)
         }
-    }
-
-    // Helper method to get a darker version of a color
-    private Color getDarkerColor(Color color) {
-        return color.deriveColor(0, 1, 0.5, 1);
     }
 
     // You might want to add this method to update the view after each turn
