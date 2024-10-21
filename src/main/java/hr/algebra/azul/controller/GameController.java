@@ -230,6 +230,13 @@ public class GameController {
             return;
         }
 
+        // Check if the pattern line already contains a different color
+        TileColor existingColor = player.getPatternLines().getLineColor(lineIndex);
+        if (existingColor != null && existingColor != colorToPlace) {
+            showAlert("Invalid move", "This line already contains tiles of a different color!");
+            return;
+        }
+
         boolean placed = player.placeTilesFromHand(colorToPlace, lineIndex);
 
         if (!placed) {

@@ -2,7 +2,6 @@ package hr.algebra.azul.model;
 import java.util.ArrayList;
 import java.util.List;
 
-
 public class PatternLines {
     private List<List<Tile>> lines;
 
@@ -42,4 +41,8 @@ public class PatternLines {
         lines.get(index).clear();
     }
 
+    public TileColor getLineColor(int lineIndex) {
+        List<Tile> line = lines.get(lineIndex);
+        return line.isEmpty() ? null : line.get(0).getColor();
+    }
 }
