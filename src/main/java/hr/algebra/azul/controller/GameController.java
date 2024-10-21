@@ -3,9 +3,7 @@ package hr.algebra.azul.controller;
 import hr.algebra.azul.model.*;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
-import javafx.scene.layout.GridPane;
-import javafx.scene.layout.FlowPane;
-import javafx.scene.layout.StackPane;
+import javafx.scene.layout.*;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.paint.Color;
 import javafx.geometry.Insets;
@@ -18,6 +16,7 @@ public class GameController {
     @FXML private GridPane factoriesGrid;
     @FXML private FlowPane centralArea;
     @FXML private GridPane playerBoardsGrid;
+    @FXML private HBox playerHandArea;
     @FXML private Button endTurnButton;
     @FXML private Button saveGameButton;
     @FXML private Button loadGameButton;
@@ -33,6 +32,7 @@ public class GameController {
         updateFactories();
         updateCentralArea();
         updatePlayerBoards();
+        updatePlayerHand();
     }
 
     private void updateCurrentPlayerLabel() {
@@ -113,9 +113,11 @@ public class GameController {
                 if (j < patternLine.size()) {
                     tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
                 } else {
-                    tileRect.setFill(Color.WHITE);
-                    tileRect.setStroke(Color.BLACK);
+                    Color emptyColor = getTileColor(TileColor.values()[i]).deriveColor(0, 1, 1, 0.5);
+                    tileRect.setFill(emptyColor);
                 }
+                int finalI = i;
+                tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalI));
                 playerBoard.add(tileRect, j, i + 1);
             }
         }
@@ -127,23 +129,42 @@ public class GameController {
                 if (player.getWall().hasTile(i, j)) {
                     tileRect.setFill(getTileColor(player.getWall().getTileColor(i, j)));
                 } else {
-                    tileRect.setFill(Color.LIGHTGRAY);
-                    tileRect.setStroke(Color.BLACK);
+                    Color emptyColor = getTileColor(TileColor.values()[j]).deriveColor(0, 1, 1, 0.5);
+                    tileRect.setFill(emptyColor);
                 }
                 playerBoard.add(tileRect, j + 6, i + 1);
             }
         }
 
-        // Add floor line
-        FlowPane floorLine = new FlowPane();
-        floorLine.setHgap(2);
-        for (Tile tile : player.getFloorLine()) {
+        // Add negative line
+        FlowPane negativeLine = new FlowPane();
+        negativeLine.setHgap(2);
+        for (Tile tile : player.getNegativeLine()) {
             Rectangle tileRect = createTileRectangle(tile.getColor());
-            floorLine.getChildren().add(tileRect);
+            negativeLine.getChildren().add(tileRect);
         }
-        playerBoard.add(floorLine, 0, 6, 11, 1);
+        playerBoard.add(negativeLine, 0, 6, 11, 1);
+
+        // Add negative line label
+        Label negativeLineLabel = new Label("Negative Line: " + player.getNegativeLine().size() + " tiles");
+        playerBoard.add(negativeLineLabel, 0, 7, 11, 1);
 
         return playerBoard;
+    }
+
+    private void updatePlayerHand() {
+        playerHandArea.getChildren().clear();
+        Map<TileColor, Integer> hand = game.getCurrentPlayer().getHand();
+        for (Map.Entry<TileColor, Integer> entry : hand.entrySet()) {
+            TileColor color = entry.getKey();
+            int count = entry.getValue();
+            StackPane tileStack = new StackPane();
+            Rectangle tileRect = createTileRectangle(color);
+            Label countLabel = new Label(String.valueOf(count));
+            countLabel.setStyle("-fx-font-weight: bold;");
+            tileStack.getChildren().addAll(tileRect, countLabel);
+            playerHandArea.getChildren().add(tileStack);
+        }
     }
 
     private Rectangle createTileRectangle(TileColor color) {
@@ -169,33 +190,43 @@ public class GameController {
         Player currentPlayer = game.getCurrentPlayer();
         Factory selectedFactory = factoryIndex == -1 ? null : game.getFactories().get(factoryIndex);
 
-        int patternLineIndex = promptForPatternLineSelection(currentPlayer, color);
-
-        boolean turnTaken = game.takeTurn(currentPlayer, selectedFactory, color, patternLineIndex);
-
-        if (!turnTaken) {
-            showAlert("Invalid move", "This move is not allowed. Please try again.");
+        List<Tile> selectedTiles;
+        if (selectedFactory == null) {
+            selectedTiles = game.getCentralArea().takeTiles(color);
+        } else {
+            selectedTiles = selectedFactory.takeTiles(color);
+            game.getCentralArea().addTiles(selectedFactory.getRemainingTiles());
         }
+
+        currentPlayer.addTilesToHand(selectedTiles);
 
         updateView();
     }
 
-    private int promptForPatternLineSelection(Player player, TileColor color) {
-        List<Integer> validLines = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            if (player.canAddTilesToPatternLine(color, i)) {
-                validLines.add(i);
+    private void onPatternLineClicked(Player player, int lineIndex) {
+        if (player != game.getCurrentPlayer()) {
+            showAlert("Invalid move", "It's not your turn!");
+            return;
+        }
+
+        Map<TileColor, Integer> hand = player.getHand();
+        if (hand.isEmpty()) {
+            showAlert("Invalid move", "You don't have any tiles in your hand!");
+            return;
+        }
+
+        TileColor colorToPlace = hand.keySet().iterator().next(); // Get the first color in hand
+        boolean placed = player.placeTilesFromHand(colorToPlace, lineIndex);
+
+        if (!placed) {
+            showAlert("Invalid move", "You can't place these tiles in this line!");
+        } else {
+            updateView();
+            if (player.getHand().isEmpty()) {
+                game.endTurn();
+                updateView();
             }
         }
-        validLines.add(-1); // Option for floor line
-
-        ChoiceDialog<Integer> dialog = new ChoiceDialog<>(-1, validLines);
-        dialog.setTitle("Select Pattern Line");
-        dialog.setHeaderText("Choose a pattern line to place the tiles");
-        dialog.setContentText("Pattern line:");
-
-        Optional<Integer> result = dialog.showAndWait();
-        return result.orElse(-1);
     }
 
     private void showAlert(String title, String content) {
@@ -215,12 +246,14 @@ public class GameController {
     @FXML
     private void onSaveGame() {
         // TODO: Implement save game functionality
+        // This is a placeholder. You'll need to implement the actual saving mechanism.
         showAlert("Save Game", "Game saved successfully!");
     }
 
     @FXML
     private void onLoadGame() {
         // TODO: Implement load game functionality
+        // This is a placeholder. You'll need to implement the actual loading mechanism.
         showAlert("Load Game", "Game loaded successfully!");
         updateView();
     }
@@ -228,5 +261,24 @@ public class GameController {
     public void setGame(Game game) {
         this.game = game;
         updateView();
+    }
+
+    private void checkGameEnd() {
+        if (game.isGameEnded()) {
+            Player winner = game.getWinner();
+            showAlert("Game Over", "The game has ended. " + winner.getName() + " wins with " + winner.getScore() + " points!");
+            // TODO: Implement any post-game actions (e.g., resetting the game, showing final scores)
+        }
+    }
+
+    // Helper method to get a darker version of a color
+    private Color getDarkerColor(Color color) {
+        return color.deriveColor(0, 1, 0.5, 1);
+    }
+
+    // You might want to add this method to update the view after each turn
+    public void onTurnEnd() {
+        updateView();
+        checkGameEnd();
     }
 }

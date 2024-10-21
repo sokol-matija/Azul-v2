@@ -11,10 +11,13 @@
     </padding>
 
     <top>
-        <HBox spacing="10" alignment="CENTER">
-            <Label text="Current Player: "/>
-            <Label fx:id="currentPlayerLabel"/>
-        </HBox>
+        <VBox spacing="10" alignment="CENTER">
+            <HBox spacing="10" alignment="CENTER">
+                <Label text="Current Player: "/>
+                <Label fx:id="currentPlayerLabel"/>
+            </HBox>
+            <HBox fx:id="playerHandArea" spacing="5" alignment="CENTER"/>
+        </VBox>
     </top>
 
     <center>
@@ -34,9 +37,9 @@
 
     <bottom>
         <HBox spacing="10" alignment="CENTER">
-            <Button text="End Turn" onAction="#onEndTurn"/>
-            <Button text="Save Game" onAction="#onSaveGame"/>
-            <Button text="Load Game" onAction="#onLoadGame"/>
+            <Button fx:id="endTurnButton" text="End Turn" onAction="#onEndTurn"/>
+            <Button fx:id="saveGameButton" text="Save Game" onAction="#onSaveGame"/>
+            <Button fx:id="loadGameButton" text="Load Game" onAction="#onLoadGame"/>
         </HBox>
     </bottom>
 </BorderPane>

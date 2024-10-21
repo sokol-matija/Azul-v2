@@ -1,8 +1,8 @@
 package hr.algebra.azul.model;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 
 public class Game {
     private List<Player> players;
@@ -58,13 +58,7 @@ public class Game {
     }
 
     private void shuffleTileBag() {
-        Random random = new Random();
-        for (int i = tileBag.size() - 1; i > 0; i--) {
-            int index = random.nextInt(i + 1);
-            Tile temp = tileBag.get(index);
-            tileBag.set(index, tileBag.get(i));
-            tileBag.set(i, temp);
-        }
+        Collections.shuffle(tileBag);
     }
 
     private void fillFactories() {
@@ -106,30 +100,31 @@ public class Game {
             return false;
         }
 
-        boolean tilePlaced = false;
-        if (patternLineIndex >= 0 && patternLineIndex < 5) {
-            tilePlaced = player.addTilesToPatternLine(takenTiles, patternLineIndex);
+        player.addTilesToHand(takenTiles);
+
+        return true;
+    }
+
+    public boolean placeTiles(Player player, TileColor color, int patternLineIndex) {
+        if (player != getCurrentPlayer()) {
+            return false;
         }
 
-        if (!tilePlaced) {
-            player.addTilesToFloorLine(takenTiles);
+        boolean placed = player.placeTilesFromHand(color, patternLineIndex);
+
+        if (placed && player.getHand().isEmpty()) {
+            endTurn();
         }
 
+        return placed;
+    }
+
+    public void endTurn() {
         if (isRoundEnd()) {
             endRound();
         } else {
             nextPlayer();
         }
-
-        return true;
-    }
-
-    public boolean takeTurnFromCentralArea(Player player, TileColor color, int patternLineIndex) {
-        return takeTurn(player, null, color, patternLineIndex);
-    }
-
-    public void endTurn() {
-        nextPlayer();
     }
 
     private boolean isRoundEnd() {
@@ -139,15 +134,16 @@ public class Game {
     private void endRound() {
         for (Player player : players) {
             player.transferTilesToWall();
-            int floorLinePenalty = player.calculateFloorLinePenalty();
-            player.setScore(player.getScore() + floorLinePenalty);
-            discardPile.addAll(player.clearFloorLine());
+            int negativeLinePenalty = player.calculateNegativeLinePenalty();
+            player.setScore(player.getScore() + negativeLinePenalty);
+            discardPile.addAll(player.clearNegativeLine());
         }
         if (isGameEnd()) {
             gameEnded = true;
             calculateFinalScores();
         } else {
             fillFactories();
+            nextPlayer();
         }
     }
 

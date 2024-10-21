@@ -1,40 +1,87 @@
 package hr.algebra.azul.model;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 public class Player {
     private String name;
     private int score;
     private PatternLines patternLines;
     private Wall wall;
-    private List<Tile> floorLine;
-    private static final int MAX_FLOOR_LINE = 7;
+    private List<Tile> negativeLine;
+    private Map<TileColor, Integer> hand;
+    private static final int MAX_NEGATIVE_LINE = 7;
 
     public Player(String name) {
         this.name = name;
         this.score = 0;
         this.patternLines = new PatternLines();
         this.wall = new Wall();
-        this.floorLine = new ArrayList<>();
+        this.negativeLine = new ArrayList<>();
+        this.hand = new EnumMap<>(TileColor.class);
     }
 
+    public void addTilesToHand(List<Tile> tiles) {
+        for (Tile tile : tiles) {
+            hand.put(tile.getColor(), hand.getOrDefault(tile.getColor(), 0) + 1);
+        }
+    }
 
-    public int calculateFloorLinePenalty() {
+    public boolean placeTilesFromHand(TileColor color, int lineIndex) {
+        if (!hand.containsKey(color) || hand.get(color) == 0) {
+            return false;
+        }
+
+        int tilesInHand = hand.get(color);
+        List<Tile> tilesToPlace = new ArrayList<>();
+        for (int i = 0; i < tilesInHand; i++) {
+            tilesToPlace.add(new Tile(color));
+        }
+
+        boolean placed = addTilesToPatternLine(tilesToPlace, lineIndex);
+        if (placed) {
+            hand.remove(color);
+        }
+        return placed;
+    }
+
+    public Map<TileColor, Integer> getHand() {
+        return new EnumMap<>(hand);
+    }
+
+    public void clearHand() {
+        hand.clear();
+    }
+
+    public boolean addTilesToPatternLine(List<Tile> tiles, int lineIndex) {
+        if (lineIndex < 0 || lineIndex >= 5) {
+            addTilesToNegativeLine(tiles);
+            return true;
+        }
+
+        List<Tile> overflow = patternLines.addTiles(tiles, lineIndex);
+        addTilesToNegativeLine(overflow);
+        return true;
+    }
+
+    public void addTilesToNegativeLine(List<Tile> tiles) {
+        for (Tile tile : tiles) {
+            if (negativeLine.size() < MAX_NEGATIVE_LINE) {
+                negativeLine.add(tile);
+            }
+        }
+    }
+
+    public int calculateNegativeLinePenalty() {
         int[] penalties = {-1, -1, -2, -2, -2, -3, -3};
         int penalty = 0;
-        for (int i = 0; i < floorLine.size(); i++) {
+        for (int i = 0; i < negativeLine.size(); i++) {
             penalty += penalties[Math.min(i, penalties.length - 1)];
         }
         return penalty;
     }
 
-    public void addTilesToFloorLine(List<Tile> tiles) {
-        for (Tile tile : tiles) {
-            if (floorLine.size() < MAX_FLOOR_LINE) {
-                floorLine.add(tile);
-            }
-        }
+    public boolean canAddTilesToPatternLine(TileColor color, int lineIndex) {
+        return patternLines.canAddTiles(color, lineIndex) && wall.canPlaceTile(color, lineIndex);
     }
 
     public void transferTilesToWall() {
@@ -47,49 +94,17 @@ public class Player {
                     score += wall.calculatePlacementScore(i, wall.getColumnForColor(tile.getColor(), i));
                     patternLines.clearLine(i);
                 } else {
-                    addTilesToFloorLine(line);
+                    addTilesToNegativeLine(line);
                 }
             }
         }
     }
 
-    public boolean addTilesToPatternLine(List<Tile> tiles, int lineIndex) {
-        if (lineIndex < 0 || lineIndex >= 5) {
-            return false;
-        }
-
-        if (!canAddTilesToPatternLine(tiles.get(0).getColor(), lineIndex)) {
-            return false;
-        }
-
-        List<Tile> overflow = patternLines.addTiles(tiles, lineIndex);
-        addTilesToFloorLine(overflow);
-        return true;
-    }
-
-    public boolean canAddTilesToPatternLine(TileColor color, int lineIndex) {
-        return patternLines.canAddTiles(color, lineIndex) && wall.canPlaceTile(color, lineIndex);
-    }
-
-    public void calculateScore() {
-        score += wall.calculateScore();
-        applyFloorLinePenalty();
-    }
-
-    private void applyFloorLinePenalty() {
-        int[] penalties = {-1, -1, -2, -2, -2, -3, -3};
-        for (int i = 0; i < floorLine.size(); i++) {
-            score += penalties[Math.min(i, penalties.length - 1)];
-        }
-        score = Math.max(score, 0); // Score cannot go below zero
-    }
-
-    public List<Tile> clearFloorLine() {
-        List<Tile> clearedTiles = new ArrayList<>(floorLine);
-        floorLine.clear();
+    public List<Tile> clearNegativeLine() {
+        List<Tile> clearedTiles = new ArrayList<>(negativeLine);
+        negativeLine.clear();
         return clearedTiles;
     }
-
 
     public boolean hasCompletedRow() {
         return wall.hasCompletedRow();
@@ -116,23 +131,17 @@ public class Player {
         return wall;
     }
 
-    public List<Tile> getFloorLine() {
-        return new ArrayList<>(floorLine);
+    public List<Tile> getNegativeLine() {
+        return new ArrayList<>(negativeLine);
     }
-
-
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Player: ").append(name).append("\n");
-        sb.append("Score: ").append(score).append("\n");
-        sb.append("Pattern Lines:\n");
-        for (int i = 0; i < 5; i++) {
-            sb.append(i + 1).append(": ").append(patternLines.getLine(i)).append("\n");
-        }
-        sb.append("Wall:\n").append(wall.toString());
-        sb.append("Floor Line: ").append(floorLine).append("\n");
-        return sb.toString();
+        return "Player{" +
+                "name='" + name + '\'' +
+                ", score=" + score +
+                ", hand=" + hand +
+                ", negativeLine=" + negativeLine +
+                '}';
     }
 }
