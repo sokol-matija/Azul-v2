@@ -127,11 +127,11 @@ public class Game {
         }
     }
 
-    private boolean isRoundEnd() {
+    public boolean isRoundEnd() {
         return factories.stream().allMatch(Factory::isEmpty) && centralArea.isEmpty();
     }
 
-    private void endRound() {
+    public void endRound() {
         for (Player player : players) {
             player.transferTilesToWall();
             int negativeLinePenalty = player.calculateNegativeLinePenalty();

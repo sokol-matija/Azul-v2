@@ -95,10 +95,12 @@ public class Player {
                     patternLines.clearLine(i);
                 } else {
                     addTilesToNegativeLine(line);
+                    patternLines.clearLine(i);
                 }
             }
         }
     }
+
 
     public List<Tile> clearNegativeLine() {
         List<Tile> clearedTiles = new ArrayList<>(negativeLine);

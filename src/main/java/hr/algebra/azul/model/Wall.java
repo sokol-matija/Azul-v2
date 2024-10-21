@@ -15,22 +15,29 @@ public class Wall {
     }
 
     public boolean canPlaceTile(TileColor color, int row) {
+        if (isColorCompleted(color)) {
+            return false;  // Cannot place a tile if its color is already completed
+        }
         int col = getColumnForColor(color, row);
         return col != -1 && tiles[row][col] == null;
     }
 
-    private boolean isColorInRow(TileColor color, int row) {
-        for (int col = 0; col < 5; col++) {
-            if (tiles[row][col] != null && tiles[row][col].getColor() == color) {
-                return true;
+    public boolean isColorCompleted(TileColor color) {
+        int count = 0;
+        for (int row = 0; row < 5; row++) {
+            for (int col = 0; col < 5; col++) {
+                if (tiles[row][col] != null && tiles[row][col].getColor() == color) {
+                    count++;
+                }
             }
         }
-        return false;
+        return count == 5;
     }
+
 
     public void placeTile(Tile tile, int row) {
         int col = getColumnForColor(tile.getColor(), row);
-        if (col != -1 && tiles[row][col] == null) {
+        if (col != -1 && tiles[row][col] == null && !isColorCompleted(tile.getColor())) {
             tiles[row][col] = tile;
         } else {
             throw new IllegalArgumentException("Cannot place tile in this position");
@@ -73,7 +80,7 @@ public class Wall {
     private int calculateColorSetsScore() {
         int score = 0;
         for (TileColor color : TileColor.values()) {
-            if (isColorSetComplete(color)) {
+            if (isColorCompleted(color)) {
                 score += 10;
             }
         }
@@ -131,18 +138,6 @@ public class Wall {
         return true;
     }
 
-    private boolean isColorSetComplete(TileColor color) {
-        int count = 0;
-        for (int row = 0; row < 5; row++) {
-            for (int col = 0; col < 5; col++) {
-                if (tiles[row][col] != null && tiles[row][col].getColor() == color) {
-                    count++;
-                }
-            }
-        }
-        return count == 5;
-    }
-
     public int getColumnForColor(TileColor color, int row) {
         for (int col = 0; col < 5; col++) {
             if (wallPattern[row][col] == color) {
@@ -164,12 +159,10 @@ public class Wall {
         return tiles;
     }
 
-    // New method to get the color from the wall pattern
     public static TileColor getWallPatternColor(int row, int col) {
         return wallPattern[row][col];
     }
 
-    // For debugging or display purposes
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();

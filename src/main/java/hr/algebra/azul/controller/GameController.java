@@ -130,7 +130,7 @@ public class GameController {
                     tileRect.setFill(getTileColor(wall.getTileColor(i, j)));
                 } else {
                     TileColor wallPatternColor = Wall.getWallPatternColor(i, j);
-                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 1);
+                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 0.5);
                     tileRect.setFill(emptyColor);
                 }
                 playerBoard.add(tileRect, j + 6, i + 1);
@@ -217,6 +217,19 @@ public class GameController {
         }
 
         TileColor colorToPlace = hand.keySet().iterator().next(); // Get the first color in hand
+
+        // Check if the color is completed in the wall
+        if (player.getWall().isColorCompleted(colorToPlace)) {
+            showAlert("Invalid move", "This color is already completed in your wall!");
+            return;
+        }
+
+        // Check if the color can be placed in this row of the wall
+        if (!player.getWall().canPlaceTile(colorToPlace, lineIndex)) {
+            showAlert("Invalid move", "You can't place this color in this row!");
+            return;
+        }
+
         boolean placed = player.placeTilesFromHand(colorToPlace, lineIndex);
 
         if (!placed) {
@@ -241,7 +254,11 @@ public class GameController {
     @FXML
     private void onEndTurn() {
         game.endTurn();
+        if (game.isRoundEnd()) {
+            game.endRound();
+        }
         updateView();
+        checkGameEnd();
     }
 
     @FXML
@@ -270,7 +287,6 @@ public class GameController {
         }
     }
 
-    // You might want to add this method to update the view after each turn
     public void onTurnEnd() {
         updateView();
         checkGameEnd();
