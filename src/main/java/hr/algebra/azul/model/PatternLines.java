@@ -13,6 +13,11 @@ public class PatternLines {
         }
     }
 
+    public boolean canAddTiles(TileColor color, int lineIndex) {
+        List<Tile> line = lines.get(lineIndex);
+        return line.size() < lineIndex + 1 && (line.isEmpty() || line.get(0).getColor() == color);
+    }
+
     public List<Tile> addTiles(List<Tile> tiles, int lineIndex) {
         List<Tile> line = lines.get(lineIndex);
         List<Tile> overflow = new ArrayList<>();
@@ -37,8 +42,4 @@ public class PatternLines {
         lines.get(index).clear();
     }
 
-    public boolean canAddTiles(TileColor color, int lineIndex) {
-        List<Tile> line = lines.get(lineIndex);
-        return line.size() < lineIndex + 1 && (line.isEmpty() || line.get(0).getColor() == color);
-    }
 }

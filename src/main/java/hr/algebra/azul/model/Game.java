@@ -90,7 +90,7 @@ public class Game {
 
     public boolean takeTurn(Player player, Factory factory, TileColor color, int patternLineIndex) {
         if (player != getCurrentPlayer()) {
-            return false; // Not the current player's turn
+            return false;
         }
 
         List<Tile> takenTiles;
@@ -103,10 +103,17 @@ public class Game {
         }
 
         if (takenTiles.isEmpty()) {
-            return false; // Invalid move
+            return false;
         }
 
-        player.addTilesToPatternLine(takenTiles, patternLineIndex);
+        boolean tilePlaced = false;
+        if (patternLineIndex >= 0 && patternLineIndex < 5) {
+            tilePlaced = player.addTilesToPatternLine(takenTiles, patternLineIndex);
+        }
+
+        if (!tilePlaced) {
+            player.addTilesToFloorLine(takenTiles);
+        }
 
         if (isRoundEnd()) {
             endRound();
@@ -132,8 +139,9 @@ public class Game {
     private void endRound() {
         for (Player player : players) {
             player.transferTilesToWall();
+            int floorLinePenalty = player.calculateFloorLinePenalty();
+            player.setScore(player.getScore() + floorLinePenalty);
             discardPile.addAll(player.clearFloorLine());
-            player.calculateScore();
         }
         if (isGameEnd()) {
             gameEnded = true;

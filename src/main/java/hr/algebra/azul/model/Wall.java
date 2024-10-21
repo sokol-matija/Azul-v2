@@ -19,6 +19,15 @@ public class Wall {
         return col != -1 && tiles[row][col] == null;
     }
 
+    private boolean isColorInRow(TileColor color, int row) {
+        for (int col = 0; col < 5; col++) {
+            if (tiles[row][col] != null && tiles[row][col].getColor() == color) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void placeTile(Tile tile, int row) {
         int col = getColumnForColor(tile.getColor(), row);
         if (col != -1 && tiles[row][col] == null) {

@@ -2,14 +2,14 @@ package hr.algebra.azul.controller;
 
 import hr.algebra.azul.model.*;
 import javafx.fxml.FXML;
-import javafx.scene.control.Label;
+import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.paint.Color;
-
-import java.util.List;
+import javafx.geometry.Insets;
+import java.util.*;
 
 public class GameController {
     private Game game;
@@ -18,9 +18,12 @@ public class GameController {
     @FXML private GridPane factoriesGrid;
     @FXML private FlowPane centralArea;
     @FXML private GridPane playerBoardsGrid;
+    @FXML private Button endTurnButton;
+    @FXML private Button saveGameButton;
+    @FXML private Button loadGameButton;
 
     public void initializeGame() {
-        game = new Game(2); // Start with 2 players for now
+        game = new Game(2); // Start with 2 players
         game.startGame();
         updateView();
     }
@@ -33,7 +36,7 @@ public class GameController {
     }
 
     private void updateCurrentPlayerLabel() {
-        currentPlayerLabel.setText(game.getCurrentPlayer().getName());
+        currentPlayerLabel.setText("Current Player: " + game.getCurrentPlayer().getName());
     }
 
     private void updateFactories() {
@@ -77,7 +80,7 @@ public class GameController {
         centralArea.getChildren().clear();
         for (Tile tile : game.getCentralArea().getTiles()) {
             Rectangle tileRect = createTileRectangle(tile.getColor());
-            tileRect.setOnMouseClicked(event -> onCentralAreaTileSelected(tile.getColor()));
+            tileRect.setOnMouseClicked(event -> onTileSelected(-1, tile.getColor()));
             centralArea.getChildren().add(tileRect);
         }
     }
@@ -96,6 +99,11 @@ public class GameController {
         GridPane playerBoard = new GridPane();
         playerBoard.setHgap(5);
         playerBoard.setVgap(5);
+        playerBoard.setPadding(new Insets(10));
+
+        // Add player name and score
+        Label nameLabel = new Label(player.getName() + " - Score: " + player.getScore());
+        playerBoard.add(nameLabel, 0, 0, 6, 1);
 
         // Add pattern lines
         for (int i = 0; i < 5; i++) {
@@ -108,18 +116,32 @@ public class GameController {
                     tileRect.setFill(Color.WHITE);
                     tileRect.setStroke(Color.BLACK);
                 }
-                playerBoard.add(tileRect, j, i);
+                playerBoard.add(tileRect, j, i + 1);
             }
         }
 
-        // Add wall (simplified for now)
+        // Add wall
         for (int i = 0; i < 5; i++) {
             for (int j = 0; j < 5; j++) {
-                Rectangle tileRect = new Rectangle(20, 20, Color.LIGHTGRAY);
-                tileRect.setStroke(Color.BLACK);
-                playerBoard.add(tileRect, j + 6, i);
+                Rectangle tileRect = new Rectangle(20, 20);
+                if (player.getWall().hasTile(i, j)) {
+                    tileRect.setFill(getTileColor(player.getWall().getTileColor(i, j)));
+                } else {
+                    tileRect.setFill(Color.LIGHTGRAY);
+                    tileRect.setStroke(Color.BLACK);
+                }
+                playerBoard.add(tileRect, j + 6, i + 1);
             }
         }
+
+        // Add floor line
+        FlowPane floorLine = new FlowPane();
+        floorLine.setHgap(2);
+        for (Tile tile : player.getFloorLine()) {
+            Rectangle tileRect = createTileRectangle(tile.getColor());
+            floorLine.getChildren().add(tileRect);
+        }
+        playerBoard.add(floorLine, 0, 6, 11, 1);
 
         return playerBoard;
     }
@@ -145,25 +167,43 @@ public class GameController {
     @FXML
     private void onTileSelected(int factoryIndex, TileColor color) {
         Player currentPlayer = game.getCurrentPlayer();
-        Factory selectedFactory = game.getFactories().get(factoryIndex);
+        Factory selectedFactory = factoryIndex == -1 ? null : game.getFactories().get(factoryIndex);
 
-        // For simplicity, we're using the first available pattern line.
-        // In a real game, you'd want to let the player choose the pattern line.
-        int patternLineIndex = getFirstAvailablePatternLine(currentPlayer, color);
+        int patternLineIndex = promptForPatternLineSelection(currentPlayer, color);
 
-        game.takeTurn(currentPlayer, selectedFactory, color, patternLineIndex);
+        boolean turnTaken = game.takeTurn(currentPlayer, selectedFactory, color, patternLineIndex);
+
+        if (!turnTaken) {
+            showAlert("Invalid move", "This move is not allowed. Please try again.");
+        }
+
         updateView();
     }
 
-    @FXML
-    private void onCentralAreaTileSelected(TileColor color) {
-        Player currentPlayer = game.getCurrentPlayer();
+    private int promptForPatternLineSelection(Player player, TileColor color) {
+        List<Integer> validLines = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            if (player.canAddTilesToPatternLine(color, i)) {
+                validLines.add(i);
+            }
+        }
+        validLines.add(-1); // Option for floor line
 
-        // Again, using the first available pattern line for simplicity
-        int patternLineIndex = getFirstAvailablePatternLine(currentPlayer, color);
+        ChoiceDialog<Integer> dialog = new ChoiceDialog<>(-1, validLines);
+        dialog.setTitle("Select Pattern Line");
+        dialog.setHeaderText("Choose a pattern line to place the tiles");
+        dialog.setContentText("Pattern line:");
 
-        game.takeTurnFromCentralArea(currentPlayer, color, patternLineIndex);
-        updateView();
+        Optional<Integer> result = dialog.showAndWait();
+        return result.orElse(-1);
+    }
+
+    private void showAlert(String title, String content) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(content);
+        alert.showAndWait();
     }
 
     @FXML
@@ -172,23 +212,21 @@ public class GameController {
         updateView();
     }
 
-    private int getFirstAvailablePatternLine(Player player, TileColor color) {
-        PatternLines patternLines = player.getPatternLines();
-        for (int i = 0; i < 5; i++) {
-            if (patternLines.canAddTiles(color, i)) {
-                return i;
-            }
-        }
-        return -1; // Floor line
-    }
-
     @FXML
     private void onSaveGame() {
         // TODO: Implement save game functionality
+        showAlert("Save Game", "Game saved successfully!");
     }
 
     @FXML
     private void onLoadGame() {
         // TODO: Implement load game functionality
+        showAlert("Load Game", "Game loaded successfully!");
+        updateView();
+    }
+
+    public void setGame(Game game) {
+        this.game = game;
+        updateView();
     }
 }

@@ -19,13 +19,14 @@ public class Player {
         this.floorLine = new ArrayList<>();
     }
 
-    public void addTilesToPatternLine(List<Tile> tiles, int lineIndex) {
-        if (lineIndex == -1) {
-            addTilesToFloorLine(tiles);
-        } else {
-            List<Tile> overflow = patternLines.addTiles(tiles, lineIndex);
-            addTilesToFloorLine(overflow);
+
+    public int calculateFloorLinePenalty() {
+        int[] penalties = {-1, -1, -2, -2, -2, -3, -3};
+        int penalty = 0;
+        for (int i = 0; i < floorLine.size(); i++) {
+            penalty += penalties[Math.min(i, penalties.length - 1)];
         }
+        return penalty;
     }
 
     public void addTilesToFloorLine(List<Tile> tiles) {
@@ -33,7 +34,6 @@ public class Player {
             if (floorLine.size() < MAX_FLOOR_LINE) {
                 floorLine.add(tile);
             }
-            // Excess tiles are returned to the bag (handled by Game class)
         }
     }
 
@@ -51,6 +51,24 @@ public class Player {
                 }
             }
         }
+    }
+
+    public boolean addTilesToPatternLine(List<Tile> tiles, int lineIndex) {
+        if (lineIndex < 0 || lineIndex >= 5) {
+            return false;
+        }
+
+        if (!canAddTilesToPatternLine(tiles.get(0).getColor(), lineIndex)) {
+            return false;
+        }
+
+        List<Tile> overflow = patternLines.addTiles(tiles, lineIndex);
+        addTilesToFloorLine(overflow);
+        return true;
+    }
+
+    public boolean canAddTilesToPatternLine(TileColor color, int lineIndex) {
+        return patternLines.canAddTiles(color, lineIndex) && wall.canPlaceTile(color, lineIndex);
     }
 
     public void calculateScore() {
@@ -72,9 +90,6 @@ public class Player {
         return clearedTiles;
     }
 
-    public boolean canAddTilesToPatternLine(TileColor color, int lineIndex) {
-        return patternLines.canAddTiles(color, lineIndex);
-    }
 
     public boolean hasCompletedRow() {
         return wall.hasCompletedRow();
