@@ -13,21 +13,20 @@ public class PatternLines {
         }
     }
 
-    public void addTiles(List<Tile> tiles, int lineIndex) {
+    public List<Tile> addTiles(List<Tile> tiles, int lineIndex) {
         List<Tile> line = lines.get(lineIndex);
-        TileColor lineColor = line.isEmpty() ? null : line.get(0).getColor();
+        List<Tile> overflow = new ArrayList<>();
+        TileColor lineColor = line.isEmpty() ? tiles.get(0).getColor() : line.get(0).getColor();
 
         for (Tile tile : tiles) {
-            if (line.size() < lineIndex + 1 && (lineColor == null || tile.getColor() == lineColor)) {
+            if (line.size() < lineIndex + 1 && tile.getColor() == lineColor) {
                 line.add(tile);
-                if (lineColor == null) {
-                    lineColor = tile.getColor();
-                }
             } else {
-                // TODO: Handle overflow tiles (they should go to the floor line)
-                break;
+                overflow.add(tile);
             }
         }
+
+        return overflow;
     }
 
     public List<Tile> getLine(int index) {
@@ -36,5 +35,10 @@ public class PatternLines {
 
     public void clearLine(int index) {
         lines.get(index).clear();
+    }
+
+    public boolean canAddTiles(TileColor color, int lineIndex) {
+        List<Tile> line = lines.get(lineIndex);
+        return line.size() < lineIndex + 1 && (line.isEmpty() || line.get(0).getColor() == color);
     }
 }

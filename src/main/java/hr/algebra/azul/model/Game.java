@@ -11,76 +11,118 @@ public class Game {
     private int currentPlayerIndex;
     private boolean gameEnded;
     private List<Tile> tileBag;
+    private List<Tile> discardPile;
+    private static final int TILES_PER_COLOR = 20;
+    private static final int FACTORY_SIZE = 4;
 
     public Game(int numberOfPlayers) {
-        players = new ArrayList<>();
-        for (int i = 0; i < numberOfPlayers; i++) {
-            players.add(new Player("Player " + (i + 1)));
+        if (numberOfPlayers < 2 || numberOfPlayers > 4) {
+            throw new IllegalArgumentException("Number of players must be between 2 and 4");
         }
-        factories = new ArrayList<>();
-        for (int i = 0; i < numberOfPlayers * 2 + 1; i++) {
-            factories.add(new Factory());
-        }
+        initializePlayers(numberOfPlayers);
+        initializeFactories(numberOfPlayers);
         centralArea = new CentralArea();
         currentPlayerIndex = 0;
         gameEnded = false;
         initializeTileBag();
+        discardPile = new ArrayList<>();
+    }
+
+    private void initializePlayers(int numberOfPlayers) {
+        players = new ArrayList<>();
+        for (int i = 0; i < numberOfPlayers; i++) {
+            players.add(new Player("Player " + (i + 1)));
+        }
+    }
+
+    private void initializeFactories(int numberOfPlayers) {
+        factories = new ArrayList<>();
+        int numberOfFactories = numberOfPlayers * 2 + 1;
+        for (int i = 0; i < numberOfFactories; i++) {
+            factories.add(new Factory());
+        }
     }
 
     private void initializeTileBag() {
         tileBag = new ArrayList<>();
         for (TileColor color : TileColor.values()) {
-            for (int i = 0; i < 20; i++) {
+            for (int i = 0; i < TILES_PER_COLOR; i++) {
                 tileBag.add(new Tile(color));
             }
         }
     }
 
     public void startGame() {
+        shuffleTileBag();
         fillFactories();
     }
 
-    private void fillFactories() {
+    private void shuffleTileBag() {
         Random random = new Random();
+        for (int i = tileBag.size() - 1; i > 0; i--) {
+            int index = random.nextInt(i + 1);
+            Tile temp = tileBag.get(index);
+            tileBag.set(index, tileBag.get(i));
+            tileBag.set(i, temp);
+        }
+    }
+
+    private void fillFactories() {
         for (Factory factory : factories) {
             List<Tile> factoryTiles = new ArrayList<>();
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < FACTORY_SIZE; i++) {
+                if (tileBag.isEmpty()) {
+                    refillTileBag();
+                }
                 if (!tileBag.isEmpty()) {
-                    int index = random.nextInt(tileBag.size());
-                    factoryTiles.add(tileBag.remove(index));
+                    factoryTiles.add(tileBag.remove(tileBag.size() - 1));
                 }
             }
             factory.fillFactory(factoryTiles);
         }
     }
 
-    public void takeTurn(Player player, Factory factory, TileColor color) {
-        List<Tile> takenTiles = factory.takeTiles(color);
-        player.addTilesToPatternLine(takenTiles, choosePatternLine(player, color));
-        centralArea.addTiles(factory.getRemainingTiles());
+    private void refillTileBag() {
+        tileBag.addAll(discardPile);
+        discardPile.clear();
+        shuffleTileBag();
+    }
+
+    public boolean takeTurn(Player player, Factory factory, TileColor color, int patternLineIndex) {
+        if (player != getCurrentPlayer()) {
+            return false; // Not the current player's turn
+        }
+
+        List<Tile> takenTiles;
+
+        if (factory == null) {
+            takenTiles = centralArea.takeTiles(color);
+        } else {
+            takenTiles = factory.takeTiles(color);
+            centralArea.addTiles(factory.getRemainingTiles());
+        }
+
+        if (takenTiles.isEmpty()) {
+            return false; // Invalid move
+        }
+
+        player.addTilesToPatternLine(takenTiles, patternLineIndex);
 
         if (isRoundEnd()) {
             endRound();
         } else {
             nextPlayer();
         }
+
+        return true;
     }
 
-    public void takeTurnFromCentralArea(Player player, TileColor color) {
-        List<Tile> takenTiles = centralArea.takeTiles(color);
-        player.addTilesToPatternLine(takenTiles, choosePatternLine(player, color));
-
-        if (isRoundEnd()) {
-            endRound();
-        } else {
-            nextPlayer();
-        }
+    public boolean takeTurnFromCentralArea(Player player, TileColor color, int patternLineIndex) {
+        return takeTurn(player, null, color, patternLineIndex);
     }
 
-    private int choosePatternLine(Player player, TileColor color) {
-        // Implement logic to choose the appropriate pattern line
-        // This could be done by the player or automatically
-        return 0; // Placeholder
+    public void endTurn() {
+        nextPlayer();
     }
 
     private boolean isRoundEnd() {
@@ -90,26 +132,31 @@ public class Game {
     private void endRound() {
         for (Player player : players) {
             player.transferTilesToWall();
+            discardPile.addAll(player.clearFloorLine());
             player.calculateScore();
         }
         if (isGameEnd()) {
             gameEnded = true;
+            calculateFinalScores();
         } else {
             fillFactories();
         }
     }
 
     private boolean isGameEnd() {
-        return players.stream().anyMatch(player -> player.hasCompletedRow());
+        return players.stream().anyMatch(Player::hasCompletedRow);
+    }
+
+    private void calculateFinalScores() {
+        for (Player player : players) {
+            int finalScore = player.getScore();
+            finalScore += player.getWall().calculateScore();
+            player.setScore(finalScore);
+        }
     }
 
     private void nextPlayer() {
         currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-    }
-
-    public void endTurn() {
-        // This method can be used to forcibly end a turn if needed
-        nextPlayer();
     }
 
     public Player getCurrentPlayer() {
@@ -126,5 +173,34 @@ public class Game {
 
     public List<Player> getPlayers() {
         return players;
+    }
+
+    public boolean isGameEnded() {
+        return gameEnded;
+    }
+
+    public Player getWinner() {
+        if (!gameEnded) {
+            return null;
+        }
+        return players.stream().max((p1, p2) -> Integer.compare(p1.getScore(), p2.getScore())).orElse(null);
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Game State:\n");
+        sb.append("Current Player: ").append(getCurrentPlayer().getName()).append("\n");
+        sb.append("Factories:\n");
+        for (int i = 0; i < factories.size(); i++) {
+            sb.append("Factory ").append(i).append(": ").append(factories.get(i)).append("\n");
+        }
+        sb.append("Central Area: ").append(centralArea).append("\n");
+        sb.append("Players:\n");
+        for (Player player : players) {
+            sb.append(player).append("\n");
+        }
+        sb.append("Game Ended: ").append(gameEnded).append("\n");
+        return sb.toString();
     }
 }

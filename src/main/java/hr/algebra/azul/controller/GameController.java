@@ -144,13 +144,25 @@ public class GameController {
 
     @FXML
     private void onTileSelected(int factoryIndex, TileColor color) {
-        game.takeTurn(game.getCurrentPlayer(), game.getFactories().get(factoryIndex), color);
+        Player currentPlayer = game.getCurrentPlayer();
+        Factory selectedFactory = game.getFactories().get(factoryIndex);
+
+        // For simplicity, we're using the first available pattern line.
+        // In a real game, you'd want to let the player choose the pattern line.
+        int patternLineIndex = getFirstAvailablePatternLine(currentPlayer, color);
+
+        game.takeTurn(currentPlayer, selectedFactory, color, patternLineIndex);
         updateView();
     }
 
     @FXML
     private void onCentralAreaTileSelected(TileColor color) {
-        game.takeTurnFromCentralArea(game.getCurrentPlayer(), color);
+        Player currentPlayer = game.getCurrentPlayer();
+
+        // Again, using the first available pattern line for simplicity
+        int patternLineIndex = getFirstAvailablePatternLine(currentPlayer, color);
+
+        game.takeTurnFromCentralArea(currentPlayer, color, patternLineIndex);
         updateView();
     }
 
@@ -158,6 +170,16 @@ public class GameController {
     private void onEndTurn() {
         game.endTurn();
         updateView();
+    }
+
+    private int getFirstAvailablePatternLine(Player player, TileColor color) {
+        PatternLines patternLines = player.getPatternLines();
+        for (int i = 0; i < 5; i++) {
+            if (patternLines.canAddTiles(color, i)) {
+                return i;
+            }
+        }
+        return -1; // Floor line
     }
 
     @FXML
