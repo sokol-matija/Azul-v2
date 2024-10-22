@@ -11,6 +11,8 @@ import java.util.*;
 
 public class GameController {
     private Game game;
+    private static final double WALL_TILE_BORDER_WIDTH = 2.5;
+    private static final double REGULAR_TILE_BORDER_WIDTH = 0.5;
 
     @FXML private Label currentPlayerLabel;
     @FXML private GridPane factoriesGrid;
@@ -20,11 +22,32 @@ public class GameController {
     @FXML private Button endTurnButton;
     @FXML private Button saveGameButton;
     @FXML private Button loadGameButton;
+    @FXML private Button newRoundButton;
 
     public void initializeGame() {
         game = new Game(2); // Start with 2 players
         game.startGame();
+        setupNewRoundButton();
         updateView();
+    }
+
+    private void setupNewRoundButton() {
+        newRoundButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        newRoundButton.setOnAction(event -> startNewRound());
+    }
+
+    private void startNewRound() {
+        // First ensure all current tiles are processed by ending the round
+        game.endRound();
+
+        // Reset player turn states (this isn't handled by endRound)
+        for (Player player : game.getPlayers()) {
+            player.startNewTurn();
+        }
+
+        // Update the view
+        updateView();
+        showAlert("New Round", "A new round has been started for testing!");
     }
 
     private void updateView() {
@@ -112,8 +135,12 @@ public class GameController {
                 Rectangle tileRect = new Rectangle(20, 20);
                 if (j < patternLine.size()) {
                     tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
+                    tileRect.setStroke(Color.BLACK);
+                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
                 } else {
-                    tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1)); // 50% darker white for empty pattern line slots
+                    tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1));
+                    tileRect.setStroke(Color.GRAY);
+                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
                 }
                 int finalI = i;
                 tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalI));
@@ -121,17 +148,24 @@ public class GameController {
             }
         }
 
-        // Add wall
         Wall wall = player.getWall();
         for (int i = 0; i < 5; i++) {
             for (int j = 0; j < 5; j++) {
                 Rectangle tileRect = new Rectangle(20, 20);
                 if (wall.hasTile(i, j)) {
+                    // Placed tile - thicker border and full color
                     tileRect.setFill(getTileColor(wall.getTileColor(i, j)));
+                    tileRect.setStroke(Color.BLACK);
+                    tileRect.setStrokeWidth(WALL_TILE_BORDER_WIDTH);
+                    // Add slight drop shadow or glow effect to emphasize placement
+                    tileRect.setStyle("-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 2, 0, 0, 1);");
                 } else {
+                    // Empty slot - thinner border and semi-transparent color
                     TileColor wallPatternColor = Wall.getWallPatternColor(i, j);
-                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 0.5);
+                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 0.3);
                     tileRect.setFill(emptyColor);
+                    tileRect.setStroke(Color.GRAY);
+                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
                 }
                 playerBoard.add(tileRect, j + 6, i + 1);
             }
@@ -189,17 +223,19 @@ public class GameController {
     @FXML
     private void onTileSelected(int factoryIndex, TileColor color) {
         Player currentPlayer = game.getCurrentPlayer();
-        Factory selectedFactory = factoryIndex == -1 ? null : game.getFactories().get(factoryIndex);
 
-        List<Tile> selectedTiles;
-        if (selectedFactory == null) {
-            selectedTiles = game.getCentralArea().takeTiles(color);
-        } else {
-            selectedTiles = selectedFactory.takeTiles(color);
-            game.getCentralArea().addTiles(selectedFactory.getRemainingTiles());
+        if (currentPlayer.hasSelectedThisTurn()) {
+            showAlert("Invalid move", "You have already selected tiles this turn!");
+            return;
         }
 
-        currentPlayer.addTilesToHand(selectedTiles);
+        Factory selectedFactory = factoryIndex == -1 ? null : game.getFactories().get(factoryIndex);
+        boolean success = game.takeTurn(currentPlayer, selectedFactory, color, -1);
+
+        if (!success) {
+            showAlert("Invalid move", "Unable to select tiles!");
+            return;
+        }
 
         updateView();
     }
@@ -216,24 +252,15 @@ public class GameController {
             return;
         }
 
-        TileColor colorToPlace = hand.keySet().iterator().next(); // Get the first color in hand
+        TileColor colorToPlace = hand.keySet().iterator().next();
 
-        // Check if the color is completed in the wall
         if (player.getWall().isColorCompleted(colorToPlace)) {
             showAlert("Invalid move", "This color is already completed in your wall!");
             return;
         }
 
-        // Check if the color can be placed in this row of the wall
         if (!player.getWall().canPlaceTile(colorToPlace, lineIndex)) {
             showAlert("Invalid move", "You can't place this color in this row!");
-            return;
-        }
-
-        // Check if the pattern line already contains a different color
-        TileColor existingColor = player.getPatternLines().getLineColor(lineIndex);
-        if (existingColor != null && existingColor != colorToPlace) {
-            showAlert("Invalid move", "This line already contains tiles of a different color!");
             return;
         }
 

@@ -61,10 +61,10 @@ public class Game {
         Collections.shuffle(tileBag);
     }
 
-    private void fillFactories() {
+    public void fillFactories() {
         for (Factory factory : factories) {
             List<Tile> factoryTiles = new ArrayList<>();
-            for (int i = 0; i < FACTORY_SIZE; i++) {
+            for (int i = 0; i < 4; i++) {  // Each factory needs 4 tiles
                 if (tileBag.isEmpty()) {
                     refillTileBag();
                 }
@@ -72,11 +72,13 @@ public class Game {
                     factoryTiles.add(tileBag.remove(tileBag.size() - 1));
                 }
             }
-            factory.fillFactory(factoryTiles);
+            if (factoryTiles.size() == 4) {  // Only fill if we have all 4 tiles
+                factory.fillFactory(factoryTiles);
+            }
         }
     }
 
-    private void refillTileBag() {
+    public void refillTileBag() {
         tileBag.addAll(discardPile);
         discardPile.clear();
         shuffleTileBag();
@@ -84,6 +86,10 @@ public class Game {
 
     public boolean takeTurn(Player player, Factory factory, TileColor color, int patternLineIndex) {
         if (player != getCurrentPlayer()) {
+            return false;
+        }
+
+        if(player.hasSelectedThisTurn()){
             return false;
         }
 
@@ -101,7 +107,6 @@ public class Game {
         }
 
         player.addTilesToHand(takenTiles);
-
         return true;
     }
 
@@ -137,15 +142,19 @@ public class Game {
             int negativeLinePenalty = player.calculateNegativeLinePenalty();
             player.setScore(player.getScore() + negativeLinePenalty);
             discardPile.addAll(player.clearNegativeLine());
+            player.startNewTurn();
         }
+
         if (isGameEnd()) {
             gameEnded = true;
             calculateFinalScores();
-        } else {
-            fillFactories();
-            nextPlayer();
+            return;
         }
+
+        fillFactories();
+        nextPlayer();
     }
+
 
     private boolean isGameEnd() {
         return players.stream().anyMatch(Player::hasCompletedRow);
@@ -161,6 +170,7 @@ public class Game {
 
     private void nextPlayer() {
         currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+        getCurrentPlayer().startNewTurn();
     }
 
     public Player getCurrentPlayer() {

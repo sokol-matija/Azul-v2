@@ -121,12 +121,13 @@ public class Wall {
     }
 
     private boolean isRowComplete(int row) {
+        int tilesInRow = 0;
         for (int col = 0; col < 5; col++) {
-            if (tiles[row][col] == null) {
-                return false;
+            if (tiles[row][col] != null) {
+                tilesInRow++;
             }
         }
-        return true;
+        return tilesInRow == 5;  // Row is complete when it has all 5 tiles
     }
 
     private boolean isColumnComplete(int col) {

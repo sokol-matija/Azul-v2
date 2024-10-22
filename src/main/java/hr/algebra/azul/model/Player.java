@@ -9,6 +9,7 @@ public class Player {
     private Wall wall;
     private List<Tile> negativeLine;
     private Map<TileColor, Integer> hand;
+    private boolean hasSelectedThisTurn;
     private static final int MAX_NEGATIVE_LINE = 7;
 
     public Player(String name) {
@@ -18,12 +19,25 @@ public class Player {
         this.wall = new Wall();
         this.negativeLine = new ArrayList<>();
         this.hand = new EnumMap<>(TileColor.class);
+        this.hasSelectedThisTurn = false;
+    }
+
+    public void startNewTurn(){
+        hasSelectedThisTurn = false;
+    }
+
+    public boolean hasSelectedThisTurn(){
+        return hasSelectedThisTurn;
     }
 
     public void addTilesToHand(List<Tile> tiles) {
-        for (Tile tile : tiles) {
-            hand.put(tile.getColor(), hand.getOrDefault(tile.getColor(), 0) + 1);
-        }
+       if(tiles.isEmpty()){
+           return;
+       }
+
+       TileColor color = tiles.get(0).getColor();
+       hand.put(color, hand.getOrDefault(color, 0) + tiles.size());
+       hasSelectedThisTurn = true;
     }
 
     public boolean placeTilesFromHand(TileColor color, int lineIndex) {

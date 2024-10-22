@@ -37,9 +37,10 @@
 
     <bottom>
         <HBox spacing="10" alignment="CENTER">
-            <Button fx:id="endTurnButton" text="End Turn" onAction="#onEndTurn"/>
-            <Button fx:id="saveGameButton" text="Save Game" onAction="#onSaveGame"/>
-            <Button fx:id="loadGameButton" text="Load Game" onAction="#onLoadGame"/>
+            <Button fx:id="endTurnButton" text="End Turn" />
+            <Button fx:id="newRoundButton" text="New Round (Testing)" />
+            <Button fx:id="saveGameButton" text="Save Game" />
+            <Button fx:id="loadGameButton" text="Load Game" />
         </HBox>
     </bottom>
 </BorderPane>
