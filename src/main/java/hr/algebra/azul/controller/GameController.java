@@ -1,19 +1,35 @@
+// File: src/main/java/hr/algebra/azul/controller/GameController.java
 package hr.algebra.azul.controller;
 
+import hr.algebra.azul.AzulApplication;
 import hr.algebra.azul.model.*;
+import hr.algebra.azul.network.*;
 import hr.algebra.azul.view.GameResultWindow;
+import hr.algebra.azul.network.server.LobbyMessageType;
+import hr.algebra.azul.network.GameMessage;
+import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.paint.Color;
 import javafx.geometry.Insets;
+import javafx.stage.Stage;
+
+import java.io.IOException;
 import java.util.*;
 
-public class GameController {
+public class GameController implements GameStateUpdateHandler {
     private Game game;
     private static final double WALL_TILE_BORDER_WIDTH = 2.5;
     private static final double REGULAR_TILE_BORDER_WIDTH = 0.5;
+
+    // Network-related fields
+    private Stage stage;
+    private AzulApplication mainApp;
+    private GameClient gameClient;
+    private String playerId;
+    private boolean isNetworkedGame = false;
 
     @FXML private Label currentPlayerLabel;
     @FXML private GridPane factoriesGrid;
@@ -24,12 +40,72 @@ public class GameController {
     @FXML private Button saveGameButton;
     @FXML private Button loadGameButton;
     @FXML private Button newRoundButton;
+    @FXML private VBox chatArea;
+    @FXML private TextArea chatDisplay;
+    @FXML private TextField chatInput;
+    @FXML private Button sendChatButton;
+
+    // Setters for stage and main application
+    public void setStage(Stage stage) {
+        this.stage = stage;
+    }
+
+    public void setMainApp(AzulApplication mainApp) {
+        this.mainApp = mainApp;
+    }
 
     public void initializeGame() {
-        game = new Game(2); // Start with 2 players
+        game = new Game(2); // Start with 2 players for local game
         game.startGame();
         setupNewRoundButton();
         updateView();
+    }
+
+    public void initializeNetworkedGame(GameState gameState, GameClient gameClient, String playerId) {
+        this.gameClient = gameClient;
+        this.playerId = playerId;
+        this.isNetworkedGame = true;
+
+        // Initialize the game with the received game state
+        game = gameState.getGame();
+
+        // Set up network event handlers
+        setupNetworkHandlers();
+        setupChatHandlers();
+
+        // Update the UI
+        updateView();
+    }
+
+    private void setupNetworkHandlers() {
+        if (!isNetworkedGame) return;
+
+        // Already implementing GameStateUpdateHandler interface
+        gameClient.setGameHandler(this);
+    }
+
+    private void setupChatHandlers() {
+        if (!isNetworkedGame) {
+            chatArea.setVisible(false);
+            return;
+        }
+
+        sendChatButton.setOnAction(e -> sendChatMessage());
+        chatInput.setOnAction(e -> sendChatMessage());
+    }
+
+    private void sendChatMessage() {
+        if (!chatInput.getText().trim().isEmpty()) {
+            GameMessage chatMessage = new GameMessage(
+                    MessageType.CHAT,
+                    playerId,
+                    null,
+                    null,
+                    chatInput.getText()
+            );
+            gameClient.sendGameMessage(chatMessage);
+            chatInput.clear();
+        }
     }
 
     private void setupNewRoundButton() {
@@ -38,17 +114,12 @@ public class GameController {
     }
 
     private void startNewRound() {
-        // First ensure all current tiles are processed by ending the round
         game.endRound();
-
-        // Reset player turn states (this isn't handled by endRound)
         for (Player player : game.getPlayers()) {
             player.startNewTurn();
         }
-
-        // Update the view
         updateView();
-        showAlert("New Round", "A new round has been started for testing!");
+        showAlert("New Round", "A new round has been started!");
     }
 
     private void updateView() {
@@ -131,37 +202,47 @@ public class GameController {
 
         // Add pattern lines
         for (int i = 0; i < 5; i++) {
-            List<Tile> patternLine = player.getPatternLines().getLine(i);
-            for (int j = 0; j <= i; j++) {
-                Rectangle tileRect = new Rectangle(20, 20);
-                if (j < patternLine.size()) {
-                    tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
-                    tileRect.setStroke(Color.BLACK);
-                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
-                } else {
-                    tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1));
-                    tileRect.setStroke(Color.GRAY);
-                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
-                }
-                int finalI = i;
-                tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalI));
-                playerBoard.add(tileRect, j, i + 1);
-            }
+            addPatternLine(playerBoard, player, i);
         }
 
-        Wall wall = player.getWall();
+        // Add wall
+        addWall(playerBoard, player.getWall());
+
+        // Add negative line
+        addNegativeLine(playerBoard, player);
+
+        return playerBoard;
+    }
+
+    private void addPatternLine(GridPane playerBoard, Player player, int row) {
+        List<Tile> patternLine = player.getPatternLines().getLine(row);
+        for (int j = 0; j <= row; j++) {
+            Rectangle tileRect = new Rectangle(20, 20);
+            if (j < patternLine.size()) {
+                tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
+                tileRect.setStroke(Color.BLACK);
+                tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
+            } else {
+                tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1));
+                tileRect.setStroke(Color.GRAY);
+                tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
+            }
+            int finalRow = row;
+            tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalRow));
+            playerBoard.add(tileRect, j, row + 1);
+        }
+    }
+
+    private void addWall(GridPane playerBoard, Wall wall) {
         for (int i = 0; i < 5; i++) {
             for (int j = 0; j < 5; j++) {
                 Rectangle tileRect = new Rectangle(20, 20);
                 if (wall.hasTile(i, j)) {
-                    // Placed tile - thicker border and full color
                     tileRect.setFill(getTileColor(wall.getTileColor(i, j)));
                     tileRect.setStroke(Color.BLACK);
                     tileRect.setStrokeWidth(WALL_TILE_BORDER_WIDTH);
-                    // Add slight drop shadow or glow effect to emphasize placement
                     tileRect.setStyle("-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 2, 0, 0, 1);");
                 } else {
-                    // Empty slot - thinner border and semi-transparent color
                     TileColor wallPatternColor = Wall.getWallPatternColor(i, j);
                     Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 0.3);
                     tileRect.setFill(emptyColor);
@@ -171,8 +252,9 @@ public class GameController {
                 playerBoard.add(tileRect, j + 6, i + 1);
             }
         }
+    }
 
-        // Add negative line
+    private void addNegativeLine(GridPane playerBoard, Player player) {
         FlowPane negativeLine = new FlowPane();
         negativeLine.setHgap(2);
         for (Tile tile : player.getNegativeLine()) {
@@ -181,11 +263,8 @@ public class GameController {
         }
         playerBoard.add(negativeLine, 0, 6, 11, 1);
 
-        // Add negative line label
         Label negativeLineLabel = new Label("Negative Line: " + player.getNegativeLine().size() + " tiles");
         playerBoard.add(negativeLineLabel, 0, 7, 11, 1);
-
-        return playerBoard;
     }
 
     private void updatePlayerHand() {
@@ -211,20 +290,23 @@ public class GameController {
     }
 
     private Color getTileColor(TileColor color) {
-        switch (color) {
-            case RED: return Color.RED;
-            case BLUE: return Color.BLUE;
-            case YELLOW: return Color.YELLOW;
-            case BLACK: return Color.BLACK;
-            case WHITE: return Color.WHITE;
-            default: return Color.GRAY;
-        }
+        return switch (color) {
+            case RED -> Color.RED;
+            case BLUE -> Color.BLUE;
+            case YELLOW -> Color.YELLOW;
+            case BLACK -> Color.BLACK;
+            case WHITE -> Color.WHITE;
+            default -> Color.GRAY;
+        };
     }
 
-    @FXML
     private void onTileSelected(int factoryIndex, TileColor color) {
-        Player currentPlayer = game.getCurrentPlayer();
+        if (isNetworkedGame && !isCurrentPlayer()) {
+            showAlert("Not Your Turn", "Please wait for your turn");
+            return;
+        }
 
+        Player currentPlayer = game.getCurrentPlayer();
         if (currentPlayer.hasSelectedThisTurn()) {
             showAlert("Invalid move", "You have already selected tiles this turn!");
             return;
@@ -238,10 +320,26 @@ public class GameController {
             return;
         }
 
+        if (isNetworkedGame) {
+            // Send move to other players
+            GameAction action = new GameAction(
+                    GameAction.ActionType.SELECT_TILES,
+                    factoryIndex,
+                    color,
+                    -1
+            );
+            sendGameAction(action);
+        }
+
         updateView();
     }
 
     private void onPatternLineClicked(Player player, int lineIndex) {
+        if (isNetworkedGame && !isCurrentPlayer()) {
+            showAlert("Not Your Turn", "Please wait for your turn");
+            return;
+        }
+
         if (player != game.getCurrentPlayer()) {
             showAlert("Invalid move", "It's not your turn!");
             return;
@@ -269,15 +367,40 @@ public class GameController {
 
         if (!placed) {
             showAlert("Invalid move", "You can't place these tiles in this line!");
-        } else {
-            updateView();
-            if (player.getHand().isEmpty()) {
-                game.endTurn();
-                updateView();
-                // Check for game end after placement and turn end
-                checkGameEnd();
-            }
+            return;
         }
+
+        if (isNetworkedGame) {
+            // Send move to other players
+            GameAction action = new GameAction(
+                    GameAction.ActionType.PLACE_TILES,
+                    -1,
+                    colorToPlace,
+                    lineIndex
+            );
+            sendGameAction(action);
+        }
+
+        updateView();
+        if (player.getHand().isEmpty()) {
+            game.endTurn();
+            updateView();
+            checkGameEnd();
+        }
+    }
+
+    private void sendGameAction(GameAction action) {
+        GameMessage message = new GameMessage(
+                MessageType.MOVE,
+                playerId,
+                action,
+                new GameState(game)
+        );
+        gameClient.sendGameMessage(message);
+    }
+
+    private boolean isCurrentPlayer() {
+        return game.getCurrentPlayer().getName().equals(playerId);
     }
 
     private void showAlert(String title, String content) {
@@ -290,29 +413,48 @@ public class GameController {
 
     @FXML
     private void onEndTurn() {
+        if (isNetworkedGame && !isCurrentPlayer()) {
+            showAlert("Not Your Turn", "Please wait for your turn");
+            return;
+        }
+
         game.endTurn();
         if (game.isRoundEnd()) {
             game.endRound();
         }
+
+        if (isNetworkedGame) {
+            GameAction action = new GameAction(
+                    GameAction.ActionType.END_TURN,
+                    -1,
+                    null,
+                    -1
+            );
+            sendGameAction(action);
+        }
+
         updateView();
         checkGameEnd();
     }
 
     @FXML
     private void onSaveGame() {
-        // TODO: Implement save game functionality
+        // TODO: Implement save game functionality with network state
+        if (isNetworkedGame) {
+            showAlert("Save Game", "Saving networked games is not yet implemented!");
+            return;
+        }
         showAlert("Save Game", "Game saved successfully!");
     }
 
     @FXML
     private void onLoadGame() {
-        // TODO: Implement load game functionality
+        // TODO: Implement load game functionality with network state
+        if (isNetworkedGame) {
+            showAlert("Load Game", "Loading networked games is not yet implemented!");
+            return;
+        }
         showAlert("Load Game", "Game loaded successfully!");
-        updateView();
-    }
-
-    public void setGame(Game game) {
-        this.game = game;
         updateView();
     }
 
@@ -321,17 +463,141 @@ public class GameController {
             GameResultWindow resultWindow = new GameResultWindow(game.getPlayers());
 
             resultWindow.setOnNewGameRequest(() -> {
-                initializeGame();
-                updateView();
+                if (isNetworkedGame) {
+                    // Handle networked new game request
+                    showAlert("New Game", "Starting a new networked game...");
+                    // TODO: Implement networked new game logic
+                } else {
+                    initializeGame();
+                    updateView();
+                }
             });
 
             resultWindow.setOnExitRequest(() -> {
-                // Handle exit to menu - perhaps show the main menu scene
-                // mainStage.setScene(menuScene);
+                if (isNetworkedGame) {
+                    // Clean up network resources
+                    cleanup();
+                }
+//                // Return to main menu or lobby
+//                try {
+//                    //mainApp.showLobbyScreen();
+////                } catch (IOException e) {
+////                    showAlert("Error", "Failed to return to lobby: " + e.getMessage());
+////                }
             });
 
             resultWindow.show();
         }
+    }
+
+    // GameStateUpdateHandler implementation
+    @Override
+    public void onGameStateUpdate(GameState newState) {
+        Platform.runLater(() -> {
+            game = newState.getGame();
+            updateView();
+        });
+    }
+
+    @Override
+    public void onGameMove(GameAction action) {
+        Platform.runLater(() -> {
+            processNetworkMove(action);
+            updateView();
+        });
+    }
+
+    @Override
+    public void onChatMessage(String senderId, String message) {
+        Platform.runLater(() -> {
+            if (chatDisplay != null) {
+                chatDisplay.appendText(String.format("%s: %s\n", senderId, message));
+            }
+        });
+    }
+
+    @Override
+    public void onPlayerStatusChange(String playerId, boolean joined) {
+        Platform.runLater(() -> {
+            String message = joined ? "joined" : "left";
+            showAlert("Player Status", "Player " + playerId + " has " + message + " the game");
+            if (!joined) {
+                handlePlayerDisconnection(playerId);
+            }
+        });
+    }
+
+    @Override
+    public String getCurrentPlayerId() {
+        return playerId;
+    }
+
+    private void processNetworkMove(GameAction action) {
+        if (action == null) return;
+
+        switch (action.getType()) {
+            case SELECT_TILES:
+                handleNetworkTileSelection(action);
+                break;
+            case PLACE_TILES:
+                handleNetworkTilePlacement(action);
+                break;
+            case END_TURN:
+                handleNetworkEndTurn();
+                break;
+        }
+    }
+
+    private void handleNetworkTileSelection(GameAction action) {
+        Player currentPlayer = game.getCurrentPlayer();
+        Factory selectedFactory = action.getFactoryIndex() == -1 ?
+                null : game.getFactories().get(action.getFactoryIndex());
+        game.takeTurn(currentPlayer, selectedFactory, action.getSelectedColor(), -1);
+    }
+
+    private void handleNetworkTilePlacement(GameAction action) {
+        Player currentPlayer = game.getCurrentPlayer();
+        currentPlayer.placeTilesFromHand(action.getSelectedColor(), action.getPatternLineIndex());
+    }
+
+    private void handleNetworkEndTurn() {
+        game.endTurn();
+        if (game.isRoundEnd()) {
+            game.endRound();
+        }
+    }
+
+    private void handlePlayerDisconnection(String disconnectedPlayerId) {
+        // Handle player disconnection
+        // For now, just show an alert
+        showAlert("Player Disconnected",
+                "Player " + disconnectedPlayerId + " has disconnected from the game");
+
+        // In a more sophisticated implementation, you might want to:
+        // 1. Pause the game
+        // 2. Wait for reconnection
+        // 3. Save the game state
+        // 4. Return to lobby if too many players disconnect
+    }
+
+
+
+    public void cleanup() {
+        if (isNetworkedGame && gameClient != null) {
+            // Send a leave message before disconnecting
+            GameMessage leaveMessage = new GameMessage(
+                    MessageType.LEAVE,
+                    playerId,
+                    null,
+                    null
+            );
+            gameClient.sendGameMessage(leaveMessage);
+        }
+    }
+
+    public void setGame(Game game) {
+        this.game = game;
+        updateView();
     }
 
     public void onTurnEnd() {

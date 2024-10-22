@@ -4,43 +4,67 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
-<BorderPane xmlns:fx="http://javafx.com/fxml"
-            fx:controller="hr.algebra.azul.controller.GameController">
-    <padding>
-        <Insets top="20" right="20" bottom="20" left="20"/>
-    </padding>
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="hr.algebra.azul.controller.GameController"
+            prefHeight="800.0" prefWidth="1200.0">
 
     <top>
-        <VBox spacing="10" alignment="CENTER">
-            <HBox spacing="10" alignment="CENTER">
-                <Label text="Current Player: "/>
-                <Label fx:id="currentPlayerLabel"/>
+        <VBox spacing="10">
+            <padding>
+                <Insets top="10" right="10" bottom="10" left="10"/>
+            </padding>
+
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label fx:id="currentPlayerLabel" style="-fx-font-size: 16px;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="connectionStatus" style="-fx-font-size: 14px;"/>
+                <Button fx:id="hostGameButton" text="Host Game"/>
+                <Button fx:id="joinGameButton" text="Join Game"/>
             </HBox>
-            <HBox fx:id="playerHandArea" spacing="5" alignment="CENTER"/>
+
+            <HBox spacing="10">
+                <Button fx:id="saveGameButton" text="Save Game"/>
+                <Button fx:id="loadGameButton" text="Load Game"/>
+                <Button fx:id="endTurnButton" text="End Turn"/>
+                <Button fx:id="newRoundButton" text="New Round"/>
+            </HBox>
         </VBox>
     </top>
 
     <center>
-        <HBox spacing="20">
+        <SplitPane dividerPositions="0.7">
             <VBox spacing="10">
-                <Label text="Factories"/>
-                <GridPane fx:id="factoriesGrid" hgap="10" vgap="10"/>
-                <Label text="Central Area"/>
-                <FlowPane fx:id="centralArea" hgap="5" vgap="5"/>
-            </VBox>
-            <VBox spacing="10">
-                <Label text="Player Boards"/>
-                <GridPane fx:id="playerBoardsGrid" hgap="20" vgap="20"/>
-            </VBox>
-        </HBox>
-    </center>
+                <padding>
+                    <Insets top="10" right="10" bottom="10" left="10"/>
+                </padding>
 
-    <bottom>
-        <HBox spacing="10" alignment="CENTER">
-            <Button fx:id="endTurnButton" text="End Turn" />
-            <Button fx:id="newRoundButton" text="New Round (Testing)" />
-            <Button fx:id="saveGameButton" text="Save Game" />
-            <Button fx:id="loadGameButton" text="Load Game" />
-        </HBox>
-    </bottom>
+                <Label text="Factories" style="-fx-font-size: 14px;"/>
+                <GridPane fx:id="factoriesGrid" hgap="10" vgap="10"/>
+
+                <Label text="Central Area" style="-fx-font-size: 14px;"/>
+                <FlowPane fx:id="centralArea" hgap="5" vgap="5"/>
+
+                <Label text="Player Boards" style="-fx-font-size: 14px;"/>
+                <GridPane fx:id="playerBoardsGrid" hgap="20" vgap="20"/>
+
+                <Label text="Current Player's Hand" style="-fx-font-size: 14px;"/>
+                <HBox fx:id="playerHandArea" spacing="5"/>
+            </VBox>
+
+            <VBox fx:id="chatArea" spacing="10">
+                <padding>
+                    <Insets top="10" right="10" bottom="10" left="10"/>
+                </padding>
+
+                <Label text="Chat" style="-fx-font-size: 14px;"/>
+                <TextArea fx:id="chatDisplay" VBox.vgrow="ALWAYS"/>
+
+                <HBox spacing="5">
+                    <TextField fx:id="chatInput" HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="sendChatButton" text="Send"/>
+                </HBox>
+            </VBox>
+        </SplitPane>
+    </center>
 </BorderPane>
