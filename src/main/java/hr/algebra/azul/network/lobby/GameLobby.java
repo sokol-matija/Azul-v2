@@ -1,8 +1,8 @@
 package hr.algebra.azul.network.lobby;
 
-import hr.algebra.azul.network.GameState;
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class GameLobby implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -16,12 +16,9 @@ public class GameLobby implements Serializable {
     public GameLobby(String hostId) {
         this.lobbyId = UUID.randomUUID().toString();
         this.hostId = hostId;
-        this.players = new HashMap<>();
+        this.players = new ConcurrentHashMap<>(); // Changed from HashMap to ConcurrentHashMap
         this.status = LobbyStatus.WAITING;
         this.settings = new GameSettings();
-
-        // Add host as first player
-        addPlayer(hostId, "Host");
     }
 
     public void addPlayer(String playerId, String playerName) {
@@ -34,7 +31,6 @@ public class GameLobby implements Serializable {
     public void removePlayer(String playerId) {
         players.remove(playerId);
         if (playerId.equals(hostId) && !players.isEmpty()) {
-            // Transfer host if original host leaves
             hostId = players.keySet().iterator().next();
         }
     }
@@ -45,13 +41,14 @@ public class GameLobby implements Serializable {
 
     public boolean canStart() {
         return players.size() >= settings.getMinPlayers() &&
-                players.size() <= settings.getMaxPlayers();
+                players.size() <= settings.getMaxPlayers() &&
+                players.values().stream().allMatch(PlayerInfo::isReady);
     }
 
     // Getters and setters
     public String getLobbyId() { return lobbyId; }
     public String getHostId() { return hostId; }
-    public Map<String, PlayerInfo> getPlayers() { return Collections.unmodifiableMap(players); }
+    public Map<String, PlayerInfo> getPlayers() { return players; } // No longer returning unmodifiable map
     public LobbyStatus getStatus() { return status; }
     public void setStatus(LobbyStatus status) { this.status = status; }
     public GameSettings getSettings() { return settings; }

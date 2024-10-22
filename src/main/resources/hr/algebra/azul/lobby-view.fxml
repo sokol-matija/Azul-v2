@@ -4,6 +4,7 @@
 <?import javafx.scene.control.*?>
 <?import javafx.geometry.Insets?>
 
+<!-- This is how your lobby-view.fxml should be structured -->
 <BorderPane xmlns="http://javafx.com/javafx"
             xmlns:fx="http://javafx.com/fxml"
             fx:controller="hr.algebra.azul.controller.LobbyController"
@@ -15,10 +16,13 @@
                 <Insets top="10" right="10" bottom="10" left="10"/>
             </padding>
 
-            <HBox spacing="10" alignment="CENTER_LEFT">
+            <!-- This HBox will be injected as topContainer -->
+            <HBox spacing="10" alignment="CENTER_LEFT" fx:id="topContainer">
                 <Label text="Player Name:"/>
+                <!-- Player name input field -->
                 <TextField fx:id="playerNameField" promptText="Enter your name"/>
                 <Region HBox.hgrow="ALWAYS"/>
+                <!-- Status label for showing messages -->
                 <Label fx:id="statusLabel"/>
             </HBox>
         </VBox>
@@ -33,11 +37,12 @@
                 </padding>
 
                 <Label text="Available Lobbies" style="-fx-font-size: 16px;"/>
+                <!-- Lobby list view -->
                 <ListView fx:id="lobbyListView" VBox.vgrow="ALWAYS"/>
 
                 <HBox spacing="10">
-                    <Button fx:id="createLobbyButton" text="Create Lobby"
-                            style="-fx-background-color: #4CAF50; -fx-text-fill: white;"/>
+                    <!-- Lobby control buttons -->
+                    <Button fx:id="createLobbyButton" text="Create Lobby"/>
                     <Button fx:id="joinLobbyButton" text="Join Selected Lobby"/>
                 </HBox>
             </VBox>
@@ -49,13 +54,14 @@
                 </padding>
 
                 <Label text="Players in Lobby" style="-fx-font-size: 16px;"/>
+                <!-- Players list view -->
                 <ListView fx:id="playersListView" VBox.vgrow="ALWAYS"/>
 
                 <HBox spacing="10">
+                    <!-- Game control buttons -->
                     <Button fx:id="readyButton" text="Ready"/>
                     <Region HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="startGameButton" text="Start Game"
-                            style="-fx-background-color: #4CAF50; -fx-text-fill: white;"/>
+                    <Button fx:id="startGameButton" text="Start Game"/>
                 </HBox>
             </VBox>
         </SplitPane>

@@ -77,7 +77,7 @@ public class AzulApplication extends Application {
         });
 
         // Connect to server
-        // TODO: This is a bug
+        // TODO: This is a bug a error
         // Connected to the target VM, address: '127.0.0.1:1660', transport: 'socket'
         //lis 22, 2024 12:47:22 PM hr.algebra.azul.AzulApplication lambda$initializeNetworkConnection$1
         //INFO: Successfully connected to server
