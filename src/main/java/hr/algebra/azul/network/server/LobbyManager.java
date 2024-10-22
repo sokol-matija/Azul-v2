@@ -86,8 +86,19 @@ public class LobbyManager {
         Set<ClientHandler> clients = lobbyClients.get(lobby.getLobbyId());
         if (clients != null) {
             for (ClientHandler client : clients) {
-                //client.sendMessage(message);
+                client.sendMessage(message);
             }
+        }
+    }
+
+    public void updateLobby(GameLobby lobby) {
+        // Create the lobby if it doesn't exist
+        if (!activeLobbies.containsKey(lobby.getLobbyId())) {
+            activeLobbies.put(lobby.getLobbyId(), lobby);
+            lobbyClients.put(lobby.getLobbyId(), Collections.newSetFromMap(new ConcurrentHashMap<>()));
+        } else {
+            // Update existing lobby
+            activeLobbies.put(lobby.getLobbyId(), lobby);
         }
     }
 
@@ -101,7 +112,7 @@ public class LobbyManager {
         Set<ClientHandler> clients = lobbyClients.get(lobby.getLobbyId());
         if (clients != null) {
             for (ClientHandler client : clients) {
-                //client.sendMessage(message);
+                client.sendMessage(message);
             }
         }
     }
