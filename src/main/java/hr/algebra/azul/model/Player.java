@@ -115,7 +115,6 @@ public class Player {
         }
     }
 
-
     public List<Tile> clearNegativeLine() {
         List<Tile> clearedTiles = new ArrayList<>(negativeLine);
         negativeLine.clear();

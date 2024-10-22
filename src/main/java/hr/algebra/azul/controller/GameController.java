@@ -1,6 +1,7 @@
 package hr.algebra.azul.controller;
 
 import hr.algebra.azul.model.*;
+import hr.algebra.azul.view.GameResultWindow;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
@@ -273,6 +274,8 @@ public class GameController {
             if (player.getHand().isEmpty()) {
                 game.endTurn();
                 updateView();
+                // Check for game end after placement and turn end
+                checkGameEnd();
             }
         }
     }
@@ -315,9 +318,19 @@ public class GameController {
 
     private void checkGameEnd() {
         if (game.isGameEnded()) {
-            Player winner = game.getWinner();
-            showAlert("Game Over", "The game has ended. " + winner.getName() + " wins with " + winner.getScore() + " points!");
-            // TODO: Implement any post-game actions (e.g., resetting the game, showing final scores)
+            GameResultWindow resultWindow = new GameResultWindow(game.getPlayers());
+
+            resultWindow.setOnNewGameRequest(() -> {
+                initializeGame();
+                updateView();
+            });
+
+            resultWindow.setOnExitRequest(() -> {
+                // Handle exit to menu - perhaps show the main menu scene
+                // mainStage.setScene(menuScene);
+            });
+
+            resultWindow.show();
         }
     }
 

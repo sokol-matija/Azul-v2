@@ -143,18 +143,18 @@ public class Game {
             player.setScore(player.getScore() + negativeLinePenalty);
             discardPile.addAll(player.clearNegativeLine());
             player.startNewTurn();
-        }
 
-        if (isGameEnd()) {
-            gameEnded = true;
-            calculateFinalScores();
-            return;
+            // Check for game end after each player's tiles are transferred
+            if (player.hasCompletedRow()) {
+                gameEnded = true;
+                calculateFinalScores();
+                return;  // Exit immediately if game has ended
+            }
         }
 
         fillFactories();
         nextPlayer();
     }
-
 
     private boolean isGameEnd() {
         return players.stream().anyMatch(Player::hasCompletedRow);
