@@ -112,12 +112,9 @@ public class ClientHandler implements Runnable {
         try {
             switch (message.getType()) {
                 case LOBBY_UPDATE:
-                    // Create new lobby
-                    if (message.getLobby().getHostId().equals(playerId)) {
-                        GameLobby newLobby = server.getLobbyManager().createLobby(playerId);
-                        // Broadcast to all clients
-                        broadcastLobbyUpdate(newLobby);
-                    }
+                    // Broadcast the lobby update to all clients regardless of host status
+                    server.getLobbyManager().updateLobby(message.getLobby());
+                    broadcastLobbyUpdate(message.getLobby());
                     break;
                 case PLAYER_JOINED:
                     handlePlayerJoinLobby(message);
