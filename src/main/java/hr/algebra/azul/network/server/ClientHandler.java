@@ -119,7 +119,13 @@ public class ClientHandler implements Runnable {
                 case PLAYER_JOINED:
                     handlePlayerJoinLobby(message);
                     break;
-                // ... other cases
+                case GAME_START:
+                    server.getLobbyManager().startGame(message.getLobby().getLobbyId());
+                    break;
+                case LOBBY_CLOSED:
+                    server.getLobbyManager().closeLobby(message.getLobby().getLobbyId());
+                    broadcastLobbyUpdate(message.getLobby());
+                    break;
             }
         } catch (Exception e) {
             LOGGER.severe("Error handling lobby message: " + e.getMessage());
@@ -139,11 +145,21 @@ public class ClientHandler implements Runnable {
 
     private void handlePlayerJoinLobby(LobbyMessage message) {
         GameLobby lobby = message.getLobby();
-        server.getLobbyManager().addPlayerToLobby(
-                lobby.getLobbyId(),
-                this,
-                playerId
-        );
+        if (lobby != null && lobby.getPlayers().containsKey(playerId)) {
+            // Get the player info for the joining player
+            String playerName = lobby.getPlayers().get(playerId).getPlayerName();
+            
+            // Add player to lobby through lobby manager
+            server.getLobbyManager().addPlayerToLobby(
+                    lobby.getLobbyId(),
+                    this,
+                    playerId,
+                    playerName
+            );
+            
+            // Update all clients about the new player
+            broadcastLobbyUpdate(server.getLobbyManager().getLobby(lobby.getLobbyId()));
+        }
     }
 
     public void sendMessage(Object message) {
