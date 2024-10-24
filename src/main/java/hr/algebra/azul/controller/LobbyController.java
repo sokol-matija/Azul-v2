@@ -290,10 +290,41 @@ public class LobbyController implements LobbyUpdateHandler {
             return;
         }
 
-        gameClient.sendMessage(new LobbyMessage(
+        try {
+            // Create a copy of the selected lobby to modify
+            GameLobby updatedLobby = new GameLobby(selected.getHostId());
+            updatedLobby.setStatus(selected.getStatus());
+            
+            // Copy existing players
+            for (PlayerInfo player : selected.getPlayers().values()) {
+                updatedLobby.addPlayer(player.getPlayerId(), player.getPlayerName());
+                if (player.isReady()) {
+                    updatedLobby.getPlayers().get(player.getPlayerId()).setReady(true);
+                }
+            }
+            
+            // Add the new player and set them as ready
+            updatedLobby.addPlayer(playerId, playerName);
+            PlayerInfo newPlayer = updatedLobby.getPlayers().get(playerId);
+            if (newPlayer != null) {
+                newPlayer.setReady(true);
+            }
+
+            // Send join message with updated lobby
+            LobbyMessage joinMessage = new LobbyMessage(
                 LobbyMessageType.PLAYER_JOINED,
-                selected
-        ));
+                updatedLobby
+            );
+            gameClient.sendLobbyMessage(joinMessage);
+
+            // Update local state
+            currentLobby = updatedLobby;
+            updateButtonStates();
+            updatePlayersList();
+            showSuccess("Successfully joined lobby!");
+        } catch (IllegalStateException e) {
+            showError("Cannot join lobby: " + e.getMessage());
+        }
     }
 
     private void toggleReady() {

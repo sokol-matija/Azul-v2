@@ -25,12 +25,19 @@ public class LobbyManager {
         return lobby;
     }
 
-    public void addPlayerToLobby(String lobbyId, ClientHandler client, String playerName) {
+    public void addPlayerToLobby(String lobbyId, ClientHandler client, String playerId, String playerName) {
         GameLobby lobby = activeLobbies.get(lobbyId);
         if (lobby != null) {
-            lobby.addPlayer(client.getPlayerId(), playerName);
-            lobbyClients.get(lobbyId).add(client);
-            broadcastLobbyUpdate(lobby);
+            try {
+                lobby.addPlayer(playerId, playerName);
+                lobbyClients.get(lobbyId).add(client);
+                broadcastLobbyUpdate(lobby);
+                LOGGER.info("Player " + playerName + " (" + playerId + ") added to lobby " + lobbyId);
+            } catch (IllegalStateException e) {
+                LOGGER.warning("Failed to add player to lobby: " + e.getMessage());
+            }
+        } else {
+            LOGGER.warning("Attempted to add player to non-existent lobby: " + lobbyId);
         }
     }
 
@@ -118,8 +125,26 @@ public class LobbyManager {
     }
 
     public void closeLobby(String lobbyId) {
+        GameLobby lobby = activeLobbies.get(lobbyId);
+        if (lobby != null) {
+            // Notify all clients in the lobby that it's being closed
+            LobbyMessage closeMessage = new LobbyMessage(
+                LobbyMessageType.LOBBY_CLOSED,
+                lobby
+            );
+            Set<ClientHandler> clients = lobbyClients.get(lobbyId);
+            if (clients != null) {
+                for (ClientHandler client : clients) {
+                    client.sendMessage(closeMessage);
+                }
+            }
+        }
         activeLobbies.remove(lobbyId);
         lobbyClients.remove(lobbyId);
+    }
+
+    public GameLobby getLobby(String lobbyId) {
+        return activeLobbies.get(lobbyId);
     }
 
     public List<GameLobby> getActiveLobbies() {
