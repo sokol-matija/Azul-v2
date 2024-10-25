@@ -111,38 +111,105 @@ public class ClientHandler implements Runnable {
     private void handleLobbyMessage(LobbyMessage message) {
         try {
             switch (message.getType()) {
-                case LOBBY_UPDATE:
-                    // Broadcast the lobby update to all clients regardless of host status
-                    server.getLobbyManager().updateLobby(message.getLobby());
-                    broadcastLobbyUpdate(message.getLobby());
-                    break;
-                case PLAYER_JOINED:
-                    handlePlayerJoinLobby(message);
-                    break;
-                // ... other cases
+                case LOBBY_CREATE -> handleLobbyCreate(message);
+                case PLAYER_JOINED -> handlePlayerJoinLobby(message);
+                case PLAYER_READY -> handlePlayerReady(message);
+                case PLAYER_LEFT -> handlePlayerLeaveLobby(message);
+                case GAME_START -> handleGameStart(message);
+                default -> LOGGER.warning("Unknown lobby message type: " + message.getType());
             }
         } catch (Exception e) {
             LOGGER.severe("Error handling lobby message: " + e.getMessage());
+            sendErrorMessage("Error processing request: " + e.getMessage());
         }
     }
 
-    private void broadcastLobbyUpdate(GameLobby lobby) {
-        LobbyMessage updateMessage = new LobbyMessage(
-                LobbyMessageType.LOBBY_UPDATE,
-                lobby
+    private void handleLobbyCreate(LobbyMessage message) {
+        if (playerId == null || message.getPlayerId() == null) {
+            sendErrorMessage("Player ID not set");
+            return;
+        }
+
+        GameLobby lobby = server.getLobbyManager().createLobby(
+                message.getPlayerId(),
+                message.getLobby().getPlayers().get(message.getPlayerId()).getPlayerName()
         );
-        // Broadcast to all connected clients
-        server.getClients().forEach(client ->
-                client.sendMessage(updateMessage)
-        );
+
+        // Send confirmation to the creator
+        sendLobbyUpdateMessage(lobby);
     }
 
     private void handlePlayerJoinLobby(LobbyMessage message) {
-        GameLobby lobby = message.getLobby();
+        if (message.getLobby() == null || message.getPlayerId() == null) {
+            sendErrorMessage("Invalid join request");
+            return;
+        }
+
+        String lobbyId = message.getLobby().getLobbyId();
         server.getLobbyManager().addPlayerToLobby(
-                lobby.getLobbyId(),
+                lobbyId,
                 this,
-                playerId
+                message.getLobby().getPlayers().get(message.getPlayerId()).getPlayerName()
+        );
+    }
+
+    private void handlePlayerReady(LobbyMessage message) {
+        if (message.getLobby() == null || message.getPlayerId() == null) {
+            sendErrorMessage("Invalid ready status update");
+            return;
+        }
+
+        server.getLobbyManager().updatePlayerReadyStatus(
+                message.getLobby().getLobbyId(),
+                message.getPlayerId(),
+                message.getLobby().getPlayers().get(message.getPlayerId()).isReady()
+        );
+    }
+
+    private void handlePlayerLeaveLobby(LobbyMessage message) {
+        if (message.getLobby() == null || message.getPlayerId() == null) {
+            sendErrorMessage("Invalid leave request");
+            return;
+        }
+
+        server.getLobbyManager().removePlayerFromLobby(
+                message.getLobby().getLobbyId(),
+                message.getPlayerId()
+        );
+    }
+
+    private void handleGameStart(LobbyMessage message) {
+        if (message.getLobby() == null || !server.getLobbyManager().isLobbyHost(
+                message.getLobby().getLobbyId(),
+                message.getPlayerId())) {
+            sendErrorMessage("Only the host can start the game");
+            return;
+        }
+
+        server.getLobbyManager().startGame(message.getLobby().getLobbyId());
+    }
+
+    private void sendErrorMessage(String errorMessage) {
+        LobbyMessage error = new LobbyMessage.Builder(LobbyMessageType.ERROR)
+                .errorMessage(errorMessage)
+                .build();
+        sendMessage(error);
+    }
+
+    private void sendLobbyUpdateMessage(GameLobby lobby) {
+        LobbyMessage update = new LobbyMessage.Builder(LobbyMessageType.LOBBY_UPDATE)
+                .lobby(lobby)
+                .build();
+        sendMessage(update);
+    }
+
+    private void broadcastLobbyUpdate(GameLobby lobby) {
+        LobbyMessage updateMessage = new LobbyMessage.Builder(LobbyMessageType.LOBBY_UPDATE)
+                .lobby(lobby)
+                .build();
+        // Broadcast to all connected clients
+        server.getClients().forEach(client ->
+                client.sendMessage(updateMessage)
         );
     }
 

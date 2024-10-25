@@ -1,72 +1,32 @@
-// File: src/main/java/hr/algebra/azul/network/GameState.java
 package hr.algebra.azul.network;
 
 import hr.algebra.azul.model.Game;
-import hr.algebra.azul.model.Player;
 import java.io.Serializable;
-import java.util.List;
-import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public class GameState implements Serializable {
-    private static final long serialVersionUID = 1L;
-
-    private Game game;
-    private List<String> connectedPlayers;
-    private String currentPlayerId;
-    private GamePhase currentPhase;
-
     public enum GamePhase {
-        WAITING_FOR_PLAYERS,
+        WAITING,
         IN_PROGRESS,
-        ROUND_END,
-        GAME_END
+        FINISHED
     }
+
+    private final Game game;
+    private GamePhase currentPhase;
+    private String currentPlayerId;
+    private final Set<String> connectedPlayers;
+    private int version;
 
     public GameState(Game game) {
         this.game = game;
-        this.connectedPlayers = new ArrayList<>();
-        this.currentPhase = GamePhase.WAITING_FOR_PLAYERS;
-
-        // Initialize connected players from the game state
-        for (Player player : game.getPlayers()) {
-            connectedPlayers.add(player.getName());
-        }
-
-        // Set current player
-        if (game.getCurrentPlayer() != null) {
-            this.currentPlayerId = game.getCurrentPlayer().getName();
-        }
+        this.currentPhase = GamePhase.WAITING;
+        this.connectedPlayers = new HashSet<>();
+        this.version = 0;
     }
 
-    // Getters and setters
     public Game getGame() {
         return game;
-    }
-
-    public void setGame(Game game) {
-        this.game = game;
-    }
-
-    public List<String> getConnectedPlayers() {
-        return new ArrayList<>(connectedPlayers);
-    }
-
-    public void addPlayer(String playerId) {
-        if (!connectedPlayers.contains(playerId)) {
-            connectedPlayers.add(playerId);
-        }
-    }
-
-    public void removePlayer(String playerId) {
-        connectedPlayers.remove(playerId);
-    }
-
-    public String getCurrentPlayerId() {
-        return currentPlayerId;
-    }
-
-    public void setCurrentPlayerId(String currentPlayerId) {
-        this.currentPlayerId = currentPlayerId;
     }
 
     public GamePhase getCurrentPhase() {
@@ -77,13 +37,33 @@ public class GameState implements Serializable {
         this.currentPhase = currentPhase;
     }
 
-    @Override
-    public String toString() {
-        return "GameState{" +
-                "connectedPlayers=" + connectedPlayers +
-                ", currentPlayerId='" + currentPlayerId + '\'' +
-                ", currentPhase=" + currentPhase +
-                '}';
+    public String getCurrentPlayerId() {
+        return currentPlayerId;
+    }
+
+    public void setCurrentPlayerId(String currentPlayerId) {
+        this.currentPlayerId = currentPlayerId;
+    }
+
+    public Set<String> getConnectedPlayers() {
+        return connectedPlayers;
+    }
+
+    public void addPlayer(String playerId) {
+        connectedPlayers.add(playerId);
+        version++;
+    }
+
+    public void removePlayer(String playerId) {
+        connectedPlayers.remove(playerId);
+        version++;
+    }
+
+    public int getVersion() {
+        return version;
+    }
+
+    public void incrementVersion() {
+        version++;
     }
 }
-

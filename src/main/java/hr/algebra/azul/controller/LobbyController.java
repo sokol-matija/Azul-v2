@@ -1,401 +1,362 @@
 package hr.algebra.azul.controller;
 
 import hr.algebra.azul.AzulApplication;
-import hr.algebra.azul.network.ConnectionStatusHandler;
-import hr.algebra.azul.network.GameClient;
-import hr.algebra.azul.network.GameState;
-import hr.algebra.azul.network.LobbyUpdateHandler;
+import hr.algebra.azul.network.*;
 import hr.algebra.azul.network.lobby.*;
 import hr.algebra.azul.network.server.*;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
-import javafx.fxml.FXMLLoader;
-import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.shape.Circle;
-import javafx.stage.Stage;
+import javafx.animation.*;
+import javafx.util.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.logging.Logger;
 
-import java.io.IOException;
-
-/**
- * Controller for the game lobby view.
- * Handles lobby creation, joining, and player management.
- */
 public class LobbyController implements LobbyUpdateHandler {
+    private static final Logger LOGGER = Logger.getLogger(LobbyController.class.getName());
+    private static final Duration STATUS_FADE_DURATION = Duration.seconds(3);
+    private static final int MAX_PLAYER_NAME_LENGTH = 20;
+    private static final int MIN_PLAYER_NAME_LENGTH = 3;
 
-    // region FXML Injected Fields
-    @FXML private ListView<GameLobby> lobbyListView;
-    @FXML private ListView<PlayerInfo> playersListView;
-    @FXML private Button createLobbyButton;
-    @FXML private Button joinLobbyButton;
-    @FXML private Button readyButton;
-    @FXML private Button startGameButton;
-    @FXML private TextField playerNameField;
-    @FXML private Label statusLabel;
-    @FXML private HBox topContainer;
-    // endregion
+    // FXML Components
+    @FXML
+    private ListView<GameLobby> lobbyListView;
+    @FXML
+    private ListView<PlayerInfo> playersListView;
+    @FXML
+    private Button createLobbyButton;
+    @FXML
+    private Button joinLobbyButton;
+    @FXML
+    private Button readyButton;
+    @FXML
+    private Button startGameButton;
+    @FXML
+    private TextField playerNameField;
+    @FXML
+    private Label statusLabel;
+    @FXML
+    private VBox connectionStatusPane;
+    @FXML
+    private Label connectionStatusLabel;
+    @FXML
+    private ProgressBar connectionProgress;
+    @FXML
+    private HBox topContainer;
 
-    // region Class Fields
+    // Observable Collections
     private final ObservableList<GameLobby> activeLobbies = FXCollections.observableArrayList();
     private final ObservableList<PlayerInfo> lobbyPlayers = FXCollections.observableArrayList();
+
+    // State Management
     private GameClient gameClient;
     private String playerId;
     private GameLobby currentLobby;
-    private Stage stage;
-    private AzulApplication mainApp;
-    private Circle connectionIndicator;
-    private Label connectionLabel;
-    // endregion
+    private final Map<String, PlayerReadyState> playerReadyStates = new ConcurrentHashMap<>();
+    private volatile boolean isConnecting = false;
+    private volatile boolean isJoiningLobby = false;
 
-    // region Initialization Methods
+    // UI Components
+    private FadeTransition statusFade;
+    private Timeline connectionTimeout;
+
+    // Application Components
+    private AzulApplication mainApp;
+
     @FXML
     public void initialize() {
-        initializeListViews();
-        setupConnectionStatus();
-        setupButtons();
-        setupEventListeners();
+        setupUI();
+        setupListViews();
+        setupEventHandlers();
+        setupAnimations();
     }
 
-    private void initializeListViews() {
+    private void setupUI() {
+        connectionProgress.setVisible(false);
+        disableGameControls();
+        setupStyles();
+    }
+
+    private void setupStyles() {
+        // Apply CSS styles
+        String buttonStyle = """
+            
+                -fx-background-radius: 5;
+            -fx-padding: 8 15;
+            -fx-font-size: 14px;
+            """;
+
+        createLobbyButton.setStyle(buttonStyle + "-fx-background-color: #4CAF50; -fx-text-fill: white;");
+        joinLobbyButton.setStyle(buttonStyle + "-fx-background-color: #2196F3; -fx-text-fill: white;");
+        readyButton.setStyle(buttonStyle + "-fx-background-color: #FFC107; -fx-text-fill: black;");
+        startGameButton.setStyle(buttonStyle + "-fx-background-color: #4CAF50; -fx-text-fill: white;");
+
+        playerNameField.setStyle("-fx-padding: 5 10; -fx-background-radius: 3;");
+        statusLabel.setStyle("-fx-font-size: 14px;");
+    }
+
+    private void setupListViews() {
         lobbyListView.setItems(activeLobbies);
-        playersListView.setItems(lobbyPlayers);
-        configureListViewCells();
-    }
-
-    private void setupConnectionStatus() {
-        HBox statusBox = new HBox(10);
-        connectionIndicator = new Circle(5);
-        connectionIndicator.setId("connectionIndicator");
-        connectionLabel = new Label("Disconnected");
-
-        connectionIndicator.setStyle("-fx-fill: #e74c3c;"); // Initial disconnected state
-        statusBox.setStyle("-fx-padding: 5;");
-
-        statusBox.getChildren().addAll(connectionIndicator, connectionLabel);
-
-        VBox statusContainer = new VBox(10);
-        statusContainer.getChildren().add(statusBox);
-
-        if (statusLabel.getParent() instanceof Pane parent) {
-            parent.getChildren().add(0, statusContainer);
-        }
-
-        if (gameClient != null) {
-            setupConnectionHandler();
-        }
-    }
-
-    private void setupButtons() {
-        configureButtonStyles();
-        configureButtonTooltips();
-        updateButtonStates();
-    }
-
-    private void setupEventListeners() {
-        createLobbyButton.setOnAction(e -> createLobby());
-        joinLobbyButton.setOnAction(e -> joinSelectedLobby());
-        readyButton.setOnAction(e -> toggleReady());
-        startGameButton.setOnAction(e -> startGame());
-
-        // Add listener for player name changes
-        playerNameField.textProperty().addListener((obs, oldVal, newVal) ->
-                updateButtonStates());
-
-        // Add listener for lobby selection
-        lobbyListView.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) ->
-                updateButtonStates());
-    }
-    // endregion
-
-    // region Network Setup
-    public void initializeWithClient(GameClient client) {
-        this.gameClient = client;
-        this.playerId = client.getClientId();
-        setupNetworking();
-        refreshLobbyView();
-    }
-
-    private void setupNetworking() {
-        if (gameClient == null) return;
-
-        gameClient.setLobbyHandler(this);
-        requestInitialLobbies();
-        updateConnectionStatus("Connected to server");
-        enableLobbyInteractions();
-        resetLobbyState();
-    }
-
-    private void setupConnectionHandler() {
-        gameClient.setConnectionHandler(new ConnectionStatusHandler() {
-            @Override
-            public void onConnected() {
-                Platform.runLater(() -> {
-                    connectionIndicator.setStyle("-fx-fill: #2ecc71;");
-                    connectionLabel.setText("Connected");
-                });
-            }
-
-            @Override
-            public void onDisconnected(String reason) {
-                Platform.runLater(() -> {
-                    connectionIndicator.setStyle("-fx-fill: #e74c3c;");
-                    connectionLabel.setText("Disconnected: " + reason);
-                });
-            }
-
-            @Override
-            public void onConnectionFailed(String reason) {
-                Platform.runLater(() -> {
-                    connectionIndicator.setStyle("-fx-fill: #e74c3c;");
-                    connectionLabel.setText("Connection Failed: " + reason);
-                });
-            }
-        });
-    }
-
-    private void requestInitialLobbies() {
-        LobbyMessage requestLobbies = new LobbyMessage(
-                LobbyMessageType.LOBBY_UPDATE,
-                null
-        );
-        gameClient.sendLobbyMessage(requestLobbies);
-    }
-
-    private void enableLobbyInteractions() {
-        createLobbyButton.setDisable(false);
-        joinLobbyButton.setDisable(false);
-    }
-
-    private void resetLobbyState() {
-        currentLobby = null;
-        activeLobbies.clear();
-        lobbyPlayers.clear();
-        updateButtonStates();
-    }
-    // endregion
-
-    // region UI Configuration Methods
-    private void configureListViewCells() {
         lobbyListView.setCellFactory(lv -> new LobbyListCell());
+
+        playersListView.setItems(lobbyPlayers);
         playersListView.setCellFactory(lv -> new PlayerListCell());
     }
 
-    private void configureButtonStyles() {
-        // Initial states
-        startGameButton.setDisable(true);
-        readyButton.setDisable(true);
+    private void setupEventHandlers() {
+        createLobbyButton.setOnAction(e -> handleCreateLobby());
+        joinLobbyButton.setOnAction(e -> handleJoinLobby());
+        readyButton.setOnAction(e -> handleReadyToggle());
+        startGameButton.setOnAction(e -> handleStartGame());
 
-        // Style buttons
-        createLobbyButton.setStyle("""
-            -fx-background-color: #4CAF50;
-            -fx-text-fill: white;
-            -fx-font-weight: bold;
-            -fx-padding: 8 16;
-            -fx-background-radius: 4;
-        """);
+        playerNameField.textProperty().addListener((obs, oldVal, newVal) -> {
+            validatePlayerName(newVal);
+            updateButtonStates();
+        });
 
-        joinLobbyButton.setStyle("""
-            -fx-background-color: #2196F3;
-            -fx-text-fill: white;
-            -fx-padding: 8 16;
-            -fx-background-radius: 4;
-        """);
-
-        readyButton.setStyle("""
-            -fx-background-color: #FFC107;
-            -fx-text-fill: #333333;
-            -fx-padding: 8 16;
-            -fx-background-radius: 4;
-        """);
-
-        startGameButton.setStyle("""
-            -fx-background-color: #4CAF50;
-            -fx-text-fill: white;
-            -fx-font-weight: bold;
-            -fx-padding: 8 16;
-            -fx-background-radius: 4;
-        """);
-
-        // Add hover effects
-        addButtonHoverEffect(createLobbyButton, "#4CAF50", "#45a049");
-        addButtonHoverEffect(joinLobbyButton, "#2196F3", "#1976D2");
-        addButtonHoverEffect(readyButton, "#FFC107", "#FFA000");
-        addButtonHoverEffect(startGameButton, "#4CAF50", "#45a049");
+        lobbyListView.getSelectionModel().selectedItemProperty()
+                .addListener((obs, oldVal, newVal) -> updateButtonStates());
     }
 
-    private void configureButtonTooltips() {
-        createLobbyButton.setTooltip(new Tooltip("Create a new game lobby"));
-        joinLobbyButton.setTooltip(new Tooltip("Join the selected lobby"));
-        readyButton.setTooltip(new Tooltip("Toggle ready status"));
-        startGameButton.setTooltip(new Tooltip("Start the game when all players are ready"));
-    }
+    private void setupAnimations() {
+        statusFade = new FadeTransition(STATUS_FADE_DURATION, statusLabel);
+        statusFade.setFromValue(1.0);
+        statusFade.setToValue(0.0);
 
-    private void addButtonHoverEffect(Button button, String normalColor, String hoverColor) {
-        button.setOnMouseEntered(e ->
-                button.setStyle(button.getStyle().replace(normalColor, hoverColor))
+        connectionTimeout = new Timeline(
+                new KeyFrame(Duration.seconds(10), e -> handleConnectionTimeout())
         );
-        button.setOnMouseExited(e ->
-                button.setStyle(button.getStyle().replace(hoverColor, normalColor))
-        );
+        connectionTimeout.setCycleCount(1);
     }
-    // endregion
 
-    // region Action Handlers
-    private void createLobby() {
-        String playerName = playerNameField.getText().trim();
-        if (playerName.isEmpty()) {
-            showError("Please enter a player name");
-            return;
-        }
+    public void initializeWithClient(GameClient client) {
+        this.gameClient = client;
+        this.playerId = client.getClientId();
 
-        // Create a new lobby with current player as host
+        setupNetworkHandlers();
+        requestInitialLobbyState();
+    }
+
+    private void setupNetworkHandlers() {
+        if (gameClient == null) return;
+
+        gameClient.setConnectionHandler(new ConnectionHandler());
+        gameClient.setLobbyHandler(this);
+    }
+
+    private void requestInitialLobbyState() {
+        LobbyMessage request = new LobbyMessage.Builder(LobbyMessageType.LOBBY_LIST_UPDATE)
+                .playerId(playerId)
+                .build();
+        gameClient.sendLobbyMessage(request);
+    }
+
+    private void handleCreateLobby() {
+        if (!validatePlayerName(playerNameField.getText())) return;
+
+        isJoiningLobby = true;
+        showLoading("Creating lobby...");
+
         GameLobby newLobby = new GameLobby(playerId);
-        // Use the addPlayer method instead of directly accessing the map
-        newLobby.addPlayer(playerId, playerName);
+        newLobby.addPlayer(playerId, playerNameField.getText());
 
-        // Set the host as ready
-        PlayerInfo hostInfo = newLobby.getPlayers().get(playerId);
-        if (hostInfo != null) {
-            hostInfo.setReady(true);
-        }
-
-        // Send lobby creation message
-        LobbyMessage createMessage = new LobbyMessage(
-                LobbyMessageType.LOBBY_UPDATE,
-                newLobby
-        );
+        LobbyMessage createMessage = new LobbyMessage.Builder(LobbyMessageType.LOBBY_CREATE)
+                .playerId(playerId)
+                .lobby(newLobby)
+                .build();
 
         gameClient.sendLobbyMessage(createMessage);
-
-        // Update local state
-        currentLobby = newLobby;
-        updateButtonStates();
-        updatePlayersList();
-        showSuccess("Lobby created successfully!");
     }
 
-    private void joinSelectedLobby() {
+    private void handleJoinLobby() {
+        if (!validatePlayerName(playerNameField.getText())) return;
+
         GameLobby selected = lobbyListView.getSelectionModel().getSelectedItem();
         if (selected == null) {
             showError("Please select a lobby to join");
             return;
         }
 
-        String playerName = playerNameField.getText().trim();
-        if (playerName.isEmpty()) {
-            showError("Please enter a player name");
-            return;
-        }
+        isJoiningLobby = true;
+        showLoading("Joining lobby...");
 
-        gameClient.sendMessage(new LobbyMessage(
-                LobbyMessageType.PLAYER_JOINED,
-                selected
-        ));
+        LobbyMessage joinMessage = new LobbyMessage.Builder(LobbyMessageType.PLAYER_JOINED)
+                .playerId(playerId)
+                .lobby(selected)
+                .build();
+
+        gameClient.sendLobbyMessage(joinMessage);
     }
 
-    private void toggleReady() {
-        if (currentLobby != null) {
-            PlayerInfo playerInfo = currentLobby.getPlayers().get(playerId);
-            if (playerInfo != null) {
-                playerInfo.setReady(!playerInfo.isReady());
-                gameClient.sendMessage(new LobbyMessage(
-                        LobbyMessageType.LOBBY_UPDATE,
-                        currentLobby
-                ));
-            }
+    private void handleReadyToggle() {
+        if (currentLobby == null) return;
+
+        PlayerReadyState readyState = playerReadyStates.computeIfAbsent(
+                playerId,
+                id -> new PlayerReadyState()
+        );
+
+        boolean newReadyState = !readyState.isReady();
+        readyState.setReady(newReadyState);
+
+        LobbyMessage readyMessage = new LobbyMessage.Builder(LobbyMessageType.PLAYER_READY)
+                .playerId(playerId)
+                .lobby(currentLobby)
+                .playerReady(newReadyState)
+                .build();
+
+        gameClient.sendLobbyMessage(readyMessage);
+        updateReadyButton(newReadyState);
+    }
+
+    private void handleStartGame() {
+        if (currentLobby == null || !currentLobby.isHost(playerId)) return;
+
+        if (currentLobby.canStart()) {
+            showLoading("Starting game...");
+
+            LobbyMessage startMessage = new LobbyMessage.Builder(LobbyMessageType.GAME_START)
+                    .playerId(playerId)
+                    .lobby(currentLobby)
+                    .build();
+
+            gameClient.sendLobbyMessage(startMessage);
+        } else {
+            showError("Cannot start game: Not all players are ready");
         }
     }
 
-    private void startGame() {
-        if (currentLobby != null && currentLobby.isHost(playerId) &&
-                currentLobby.canStart()) {
-            gameClient.sendMessage(new LobbyMessage(
-                    LobbyMessageType.GAME_START,
-                    currentLobby
-            ));
+    private boolean validatePlayerName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            showError("Player name cannot be empty");
+            return false;
         }
-    }
-    // endregion
 
-    // region Update Methods
+        if (name.length() < MIN_PLAYER_NAME_LENGTH) {
+            showError("Player name must be at least 3 characters");
+            return false;
+        }
+
+        if (name.length() > MAX_PLAYER_NAME_LENGTH) {
+            showError("Player name must be less than 20 characters");
+            return false;
+        }
+
+        return true;
+    }
+
     private void updateButtonStates() {
-        boolean hasPlayerName = !playerNameField.getText().trim().isEmpty();
+        boolean hasValidName = validatePlayerName(playerNameField.getText());
         boolean isInLobby = currentLobby != null;
         boolean isHost = isInLobby && currentLobby.isHost(playerId);
-        boolean canStartGame = isHost && currentLobby.canStart() &&
-                currentLobby.getPlayers().values().stream()
-                        .allMatch(PlayerInfo::isReady);
+        boolean hasSelectedLobby = lobbyListView.getSelectionModel().getSelectedItem() != null;
 
-        createLobbyButton.setDisable(!hasPlayerName || isInLobby);
-        joinLobbyButton.setDisable(!hasPlayerName || isInLobby ||
-                lobbyListView.getSelectionModel().getSelectedItem() == null);
-        readyButton.setDisable(!isInLobby || isHost);
-        startGameButton.setDisable(!isHost || !canStartGame);
+        createLobbyButton.setDisable(!hasValidName || isInLobby);
+        joinLobbyButton.setDisable(!hasValidName || isInLobby || !hasSelectedLobby);
+        readyButton.setDisable(!isInLobby);
+        startGameButton.setDisable(!isInLobby || !isHost || !currentLobby.canStart());
+    }
 
-        if (isInLobby) {
-            PlayerInfo player = currentLobby.getPlayers().get(playerId);
-            if (player != null) {
-                readyButton.setText(player.isReady() ? "Not Ready" : "Ready");
-            }
+    private void updateReadyButton(boolean isReady) {
+        readyButton.setText(isReady ? "Not Ready" : "Ready");
+        readyButton.setStyle(readyButton.getStyle() +
+                (isReady ? "-fx-background-color: #e74c3c;" : "-fx-background-color: #2ecc71;"));
+    }
+
+    private void showLoading(String message) {
+        connectionProgress.setVisible(true);
+        statusLabel.setText(message);
+        connectionTimeout.playFromStart();
+    }
+
+    private void hideLoading() {
+        connectionProgress.setVisible(false);
+        connectionTimeout.stop();
+    }
+
+    private void showError(String message) {
+        statusLabel.setText(message);
+        statusLabel.setStyle("-fx-text-fill: #e74c3c;");
+        showStatusMessage();
+    }
+
+    private void showInfo(String message) {
+        statusLabel.setText(message);
+        statusLabel.setStyle("-fx-text-fill: #2ecc71;");
+        showStatusMessage();
+    }
+
+    private void showStatusMessage() {
+        statusFade.stop();
+        statusLabel.setOpacity(1.0);
+        statusFade.playFromStart();
+    }
+
+    private void handleConnectionTimeout() {
+        if (isConnecting || isJoiningLobby) {
+            showError("Operation timed out");
+            hideLoading();
+            isConnecting = false;
+            isJoiningLobby = false;
         }
     }
 
-    private void updatePlayersList() {
-        lobbyPlayers.clear();
-        if (currentLobby != null) {
-            lobbyPlayers.addAll(currentLobby.getPlayers().values());
-        }
-    }
-
-    private void updateLobbyDisplay(GameLobby lobby) {
-        if (lobby.getLobbyId().equals(currentLobby != null ?
-                currentLobby.getLobbyId() : null)) {
-            currentLobby = lobby;
-            updatePlayersList();
-            updateButtonStates();
-        } else {
-            int index = findLobbyIndex(lobby.getLobbyId());
-            if (index >= 0) {
-                activeLobbies.set(index, lobby);
-            } else {
-                activeLobbies.add(lobby);
-            }
-        }
-    }
-    // endregion
-
-    // region LobbyUpdateHandler Implementation
     @Override
     public void onLobbyUpdate(GameLobby lobby) {
         Platform.runLater(() -> {
-            int existingIndex = findLobbyIndex(lobby.getLobbyId());
-
-            if (existingIndex >= 0) {
-                activeLobbies.set(existingIndex, lobby);
-            } else {
-                activeLobbies.add(lobby);
-            }
+            hideLoading();
 
             if (currentLobby != null &&
                     currentLobby.getLobbyId().equals(lobby.getLobbyId())) {
-                currentLobby = lobby;
-                updatePlayersList();
+                handleCurrentLobbyUpdate(lobby);
+            } else {
+                updateLobbyList(lobby);
             }
 
             updateButtonStates();
         });
     }
 
+    private void handleCurrentLobbyUpdate(GameLobby lobby) {
+        currentLobby = lobby;
+        lobbyPlayers.clear();
+        lobbyPlayers.addAll(lobby.getPlayers().values());
+
+        PlayerInfo currentPlayer = lobby.getPlayers().get(playerId);
+        if (currentPlayer != null) {
+            updateReadyButton(currentPlayer.isReady());
+        }
+    }
+
+    private void updateLobbyList(GameLobby lobby) {
+        int index = -1;
+        for (int i = 0; i < activeLobbies.size(); i++) {
+            if (activeLobbies.get(i).getLobbyId().equals(lobby.getLobbyId())) {
+                index = i;
+                break;
+            }
+        }
+
+        if (index >= 0) {
+            activeLobbies.set(index, lobby);
+        } else {
+            activeLobbies.add(lobby);
+        }
+    }
+
     @Override
     public void onGameStart(GameLobby lobby, GameState gameState) {
         Platform.runLater(() -> {
+            hideLoading();
             try {
                 mainApp.switchToGame(gameState);
-            } catch (IOException e) {
+            } catch (Exception e) {
                 showError("Failed to start game: " + e.getMessage());
+                LOGGER.severe("Error starting game: " + e.getMessage());
             }
         });
     }
@@ -406,53 +367,76 @@ public class LobbyController implements LobbyUpdateHandler {
             if (currentLobby != null &&
                     currentLobby.getLobbyId().equals(lobby.getLobbyId())) {
                 currentLobby = null;
-                updatePlayersList();
-                updateButtonStates();
-                showError("Lobby has been closed");
+                lobbyPlayers.clear();
+                showInfo("Lobby has been closed");
             }
+            activeLobbies.removeIf(l -> l.getLobbyId().equals(lobby.getLobbyId()));
+            updateButtonStates();
         });
     }
-    // endregion
 
-    // region Helper Methods
-    private int findLobbyIndex(String lobbyId) {
-        for (int i = 0; i < activeLobbies.size(); i++) {
-            if (activeLobbies.get(i).getLobbyId().equals(lobbyId)) {
-                return i;
-            }
+    private class ConnectionHandler implements ConnectionStatusHandler {
+        @Override
+        public void onConnected() {
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Connected");
+                connectionStatusLabel.setStyle("-fx-text-fill: #2ecc71;");
+                hideLoading();
+                enableGameControls();
+                isConnecting = false;
+            });
         }
-        return -1;
+
+        @Override
+        public void onDisconnected(String reason) {
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Disconnected: " + reason);
+                connectionStatusLabel.setStyle("-fx-text-fill: #e74c3c;");
+                disableGameControls();
+                showError("Lost connection to server");
+            });
+        }
+
+        @Override
+        public void onConnectionFailed(String reason) {
+            Platform.runLater(() -> {
+                showError("Connection failed: " + reason);
+                hideLoading();
+                isConnecting = false;
+            });
+        }
     }
 
-    private void showError(String message) {
-        Platform.runLater(() -> {
-            statusLabel.setText(message);
-            statusLabel.setStyle("-fx-text-fill: red;");
-        });
+    private void enableGameControls() {
+        createLobbyButton.setDisable(false);
+        joinLobbyButton.setDisable(false);
+        playerNameField.setDisable(false);
+        updateButtonStates();
     }
 
-    private void showSuccess(String message) {
-        Platform.runLater(() -> {
-            statusLabel.setText(message);
-            statusLabel.setStyle("-fx-text-fill: green;");
-        });
+    private void disableGameControls() {
+        createLobbyButton.setDisable(true);
+        joinLobbyButton.setDisable(true);
+        readyButton.setDisable(true);
+        startGameButton.setDisable(true);
+        playerNameField.setDisable(true);
     }
 
-    private void updateConnectionStatus(String status) {
-        Platform.runLater(() -> {
-            if (statusLabel != null) {
-                statusLabel.setText(status);
-                statusLabel.setStyle("-fx-text-fill: green;");
-            }
-        });
+    private static class PlayerReadyState {
+        private volatile boolean ready;
+
+        public boolean isReady() {
+            return ready;
+        }
+
+        public void setReady(boolean ready) {
+            this.ready = ready;
+        }
     }
-    // region Setter/Getter Methods
+
+    // Setters for dependencies
     public void setMainApp(AzulApplication mainApp) {
         this.mainApp = mainApp;
-    }
-
-    public void setStage(Stage stage) {
-        this.stage = stage;
     }
 
     public String getPlayerId() {
@@ -461,86 +445,254 @@ public class LobbyController implements LobbyUpdateHandler {
 
     public void refreshLobbyView() {
         if (gameClient != null && gameClient.getCurrentLobby() != null) {
-            updateLobbyDisplay(gameClient.getCurrentLobby());
+            handleCurrentLobbyUpdate(gameClient.getCurrentLobby());
+            updateButtonStates();
         }
-        updateButtonStates();
     }
 
-    // region Custom Cell Classes
     private class LobbyListCell extends ListCell<GameLobby> {
+        private final VBox container;
+        private final Label hostLabel;
+        private final Label playersLabel;
+        private final Label statusLabel;
+        private final HBox statusContainer;
+        private final ProgressBar fillBar;
+
+        public LobbyListCell() {
+            container = new VBox(5);
+            container.getStyleClass().add("lobby-cell");
+            container.setPadding(new javafx.geometry.Insets(10));
+
+            hostLabel = new Label();
+            hostLabel.getStyleClass().add("host-label");
+
+            playersLabel = new Label();
+            playersLabel.getStyleClass().add("players-label");
+
+            statusLabel = new Label();
+            statusLabel.getStyleClass().add("status-label");
+
+            fillBar = new ProgressBar(0);
+            fillBar.getStyleClass().add("fill-bar");
+            fillBar.setMaxWidth(Double.MAX_VALUE);
+
+            statusContainer = new HBox(10);
+            statusContainer.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+            statusContainer.getChildren().addAll(playersLabel, statusLabel);
+
+            container.getChildren().addAll(hostLabel, statusContainer, fillBar);
+
+            setupStyles();
+        }
+
+        private void setupStyles() {
+            container.setStyle("""
+                -fx-background-color: white;
+                -fx-border-color: #e0e0e0;
+                -fx-border-radius: 5;
+                -fx-background-radius: 5;
+                -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.1), 5, 0, 0, 0);
+                """);
+
+            hostLabel.setStyle("""
+                -fx-font-weight: bold;
+                -fx-font-size: 14px;
+                """);
+
+            playersLabel.setStyle("""
+                -fx-font-size: 12px;
+                -fx-text-fill: #666666;
+                """);
+
+            statusLabel.setStyle("""
+                -fx-font-size: 12px;
+                -fx-padding: 3 8;
+                -fx-background-radius: 3;
+                """);
+
+            fillBar.setStyle("""
+                -fx-accent: #4CAF50;
+                """);
+        }
+
         @Override
         protected void updateItem(GameLobby lobby, boolean empty) {
             super.updateItem(lobby, empty);
+
             if (empty || lobby == null) {
-                setText(null);
                 setGraphic(null);
-            } else {
-                VBox container = new VBox(5);
-                container.setStyle("-fx-padding: 5; -fx-background-radius: 5;");
+                return;
+            }
 
-                // Host information
-                PlayerInfo host = lobby.getPlayers().get(lobby.getHostId());
-                Label hostLabel = new Label("Host: " +
-                        (host != null ? host.getPlayerName() : "Unknown"));
-                hostLabel.setStyle("-fx-font-weight: bold;");
+            // Update host info
+            PlayerInfo host = lobby.getPlayers().get(lobby.getHostId());
+            hostLabel.setText("Host: " + (host != null ? host.getPlayerName() : "Unknown"));
 
-                // Player count
-                Label playersLabel = new Label(String.format("Players: %d/%d",
-                        lobby.getPlayers().size(),
-                        lobby.getSettings().getMaxPlayers()));
+            // Update player count and progress
+            int playerCount = lobby.getPlayers().size();
+            int maxPlayers = lobby.getSettings().getMaxPlayers();
+            playersLabel.setText(String.format("Players: %d/%d", playerCount, maxPlayers));
+            fillBar.setProgress((double) playerCount / maxPlayers);
 
-                // Status
-                Label statusLabel = new Label("Status: " + lobby.getStatus());
+            // Update status
+            updateLobbyStatus(lobby);
 
-                container.getChildren().addAll(hostLabel, playersLabel, statusLabel);
+            // Highlight if current lobby
+            if (currentLobby != null &&
+                    currentLobby.getLobbyId().equals(lobby.getLobbyId())) {
+                container.setStyle(container.getStyle() + """
+                    -fx-border-color: #2196F3;
+                    -fx-effect: dropshadow(gaussian, rgba(33,150,243,0.2), 5, 0, 0, 0);
+                    """);
+            }
 
-                // Highlight current lobby
-                if (currentLobby != null &&
-                        currentLobby.getLobbyId().equals(lobby.getLobbyId())) {
-                    container.setStyle(container.getStyle() +
-                            "; -fx-background-color: #e3f2fd;");
+            setGraphic(container);
+        }
+
+        private void updateLobbyStatus(GameLobby lobby) {
+            switch (lobby.getStatus()) {
+                case WAITING -> {
+                    statusLabel.setText("Waiting");
+                    statusLabel.setStyle(statusLabel.getStyle() +
+                            "-fx-background-color: #fff3cd; -fx-text-fill: #856404;");
                 }
-
-                setGraphic(container);
+                case STARTING -> {
+                    statusLabel.setText("Starting");
+                    statusLabel.setStyle(statusLabel.getStyle() +
+                            "-fx-background-color: #d4edda; -fx-text-fill: #155724;");
+                }
+                case IN_PROGRESS -> {
+                    statusLabel.setText("In Progress");
+                    statusLabel.setStyle(statusLabel.getStyle() +
+                            "-fx-background-color: #cce5ff; -fx-text-fill: #004085;");
+                }
+                case FINISHED -> {
+                    statusLabel.setText("Finished");
+                    statusLabel.setStyle(statusLabel.getStyle() +
+                            "-fx-background-color: #f8d7da; -fx-text-fill: #721c24;");
+                }
             }
         }
     }
 
     private class PlayerListCell extends ListCell<PlayerInfo> {
+        private final HBox container;
+        private final Label nameLabel;
+        private final Label readyLabel;
+        private final Label hostLabel;
+        private final Region spacer;
+
+        public PlayerListCell() {
+            container = new HBox(10);
+            container.getStyleClass().add("player-cell");
+            container.setPadding(new javafx.geometry.Insets(8));
+            container.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
+
+            nameLabel = new Label();
+            nameLabel.getStyleClass().add("player-name");
+
+            readyLabel = new Label();
+            readyLabel.getStyleClass().add("ready-status");
+
+            hostLabel = new Label("(Host)");
+            hostLabel.getStyleClass().add("host-indicator");
+            hostLabel.setVisible(false);
+
+            spacer = new Region();
+            HBox.setHgrow(spacer, javafx.scene.layout.Priority.ALWAYS);
+
+            container.getChildren().addAll(nameLabel, spacer, readyLabel, hostLabel);
+
+            setupStyles();
+        }
+
+        private void setupStyles() {
+            container.setStyle("""
+                -fx-background-color: white;
+                -fx-border-color: #e0e0e0;
+                -fx-border-radius: 3;
+                -fx-background-radius: 3;
+                """);
+
+            nameLabel.setStyle("""
+                -fx-font-size: 13px;
+                -fx-font-weight: bold;
+                """);
+
+            readyLabel.setStyle("""
+                -fx-padding: 3 8;
+                -fx-background-radius: 3;
+                -fx-font-size: 12px;
+                """);
+
+            hostLabel.setStyle("""
+                -fx-font-size: 12px;
+                -fx-text-fill: #7f8c8d;
+                -fx-font-style: italic;
+                """);
+        }
+
         @Override
         protected void updateItem(PlayerInfo player, boolean empty) {
             super.updateItem(player, empty);
+
             if (empty || player == null) {
-                setText(null);
                 setGraphic(null);
-            } else {
-                HBox container = new HBox(10);
-                container.setStyle("-fx-padding: 5; -fx-background-radius: 5;");
-
-                // Player name with host indicator
-                String nameText = player.getPlayerName();
-                if (currentLobby != null &&
-                        currentLobby.isHost(player.getPlayerId())) {
-                    nameText += " (Host)";
-                }
-                Label nameLabel = new Label(nameText);
-
-                // Ready status
-                Label readyLabel = new Label(player.isReady() ? "Ready" : "Not Ready");
-                readyLabel.setStyle(player.isReady() ?
-                        "-fx-text-fill: #2ecc71; -fx-font-weight: bold;" :
-                        "-fx-text-fill: #e74c3c;");
-
-                container.getChildren().addAll(nameLabel, readyLabel);
-
-                // Highlight current player
-                if (player.getPlayerId().equals(playerId)) {
-                    container.setStyle(container.getStyle() +
-                            "; -fx-background-color: #f5f5f5;");
-                }
-
-                setGraphic(container);
+                return;
             }
+
+            nameLabel.setText(player.getPlayerName());
+
+            // Update ready status
+            readyLabel.setText(player.isReady() ? "Ready" : "Not Ready");
+            if (player.isReady()) {
+                readyLabel.setStyle(readyLabel.getStyle() + """
+                    -fx-background-color: #d4edda;
+                    -fx-text-fill: #155724;
+                    """);
+            } else {
+                readyLabel.setStyle(readyLabel.getStyle() + """
+                    -fx-background-color: #f8d7da;
+                    -fx-text-fill: #721c24;
+                    """);
+            }
+
+            // Show host indicator
+            boolean isHost = currentLobby != null &&
+                    currentLobby.isHost(player.getPlayerId());
+            hostLabel.setVisible(isHost);
+
+            // Highlight current player
+            if (player.getPlayerId().equals(playerId)) {
+                container.setStyle(container.getStyle() + """
+                    -fx-background-color: #f8f9fa;
+                    -fx-border-color: #2196F3;
+                    """);
+            }
+
+            setGraphic(container);
         }
+    }
+
+    private void showAlert(String title, String content) {
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(content);
+            alert.showAndWait();
+        });
+    }
+
+    public void cleanup() {
+        if (connectionTimeout != null) {
+            connectionTimeout.stop();
+        }
+        if (statusFade != null) {
+            statusFade.stop();
+        }
+        activeLobbies.clear();
+        lobbyPlayers.clear();
+        playerReadyStates.clear();
     }
 }

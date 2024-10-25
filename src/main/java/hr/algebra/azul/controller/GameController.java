@@ -1,12 +1,13 @@
-// File: src/main/java/hr/algebra/azul/controller/GameController.java
 package hr.algebra.azul.controller;
 
 import hr.algebra.azul.AzulApplication;
 import hr.algebra.azul.model.*;
 import hr.algebra.azul.network.*;
+import hr.algebra.azul.network.game.*;
+import hr.algebra.azul.network.recovery.*;
+import hr.algebra.azul.network.scoring.*;
+import hr.algebra.azul.network.serialization.*;
 import hr.algebra.azul.view.GameResultWindow;
-import hr.algebra.azul.network.server.LobbyMessageType;
-import hr.algebra.azul.network.GameMessage;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
@@ -15,133 +16,661 @@ import javafx.scene.shape.Rectangle;
 import javafx.scene.paint.Color;
 import javafx.geometry.Insets;
 import javafx.stage.Stage;
+import javafx.animation.*;
+import javafx.util.Duration;
 
-import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.logging.Logger;
 
 public class GameController implements GameStateUpdateHandler {
-    private Game game;
-    private static final double WALL_TILE_BORDER_WIDTH = 2.5;
-    private static final double REGULAR_TILE_BORDER_WIDTH = 0.5;
+    private static final Logger LOGGER = Logger.getLogger(GameController.class.getName());
+    private static final Duration TURN_DURATION = Duration.seconds(60);
+    private static final Duration WARNING_DURATION = Duration.seconds(10);
 
-    // Network-related fields
-    private Stage stage;
-    private AzulApplication mainApp;
+    // Game state
+    private Game game;
+    private TileColor selectedColor;
+    private Factory selectedFactory;
+    private boolean isSelectingTiles = false;
+
+    // Network components
     private GameClient gameClient;
     private String playerId;
-    private boolean isNetworkedGame = false;
+    private boolean isNetworkedGame;
 
-    @FXML private Label currentPlayerLabel;
+    // Managers
+    private GameMoveManager moveManager;
+    private TurnManager turnManager;
+    private ScoreSynchronizer scoreSynchronizer;
+    private NetworkRecoveryManager recoveryManager;
+    private GameEndManager endManager;
+    private GameStateSerializer stateSerializer;
+
+    // Application components
+    private Stage stage;
+    private AzulApplication mainApp;
+
+    // UI Components
     @FXML private GridPane factoriesGrid;
     @FXML private FlowPane centralArea;
     @FXML private GridPane playerBoardsGrid;
     @FXML private HBox playerHandArea;
+    @FXML private Label currentPlayerLabel;
     @FXML private Button endTurnButton;
     @FXML private Button saveGameButton;
     @FXML private Button loadGameButton;
-    @FXML private Button newRoundButton;
     @FXML private VBox chatArea;
     @FXML private TextArea chatDisplay;
     @FXML private TextField chatInput;
     @FXML private Button sendChatButton;
+    @FXML private ProgressBar turnProgressBar;
+    @FXML private Label turnTimerLabel;
+    @FXML private Label statusLabel;
+    @FXML private VBox connectionStatusPane;
+    @FXML private Label connectionStatusLabel;
+    @FXML private ProgressBar reconnectionProgress;
 
-    // Setters for stage and main application
-    public void setStage(Stage stage) {
-        this.stage = stage;
+    // Animations
+    private Timeline turnTimer;
+    private Timeline warningTimer;
+    private FadeTransition statusFade;
+
+    @FXML
+    public void initialize() {
+        setupUI();
+        setupAnimations();
     }
 
-    public void setMainApp(AzulApplication mainApp) {
-        this.mainApp = mainApp;
+    private void setupUI() {
+        // Initialize UI components
+        turnProgressBar.setProgress(0);
+        reconnectionProgress.setVisible(false);
+        setupFactoriesGrid();
+        setupPlayerBoards();
+        setupChat();
+        setupButtons();
     }
 
-    public void initializeGame() {
-        game = new Game(2); // Start with 2 players for local game
-        game.startGame();
-        setupNewRoundButton();
-        updateView();
+    private void setupAnimations() {
+        // Turn timer
+        turnTimer = new Timeline(
+                new KeyFrame(Duration.ZERO,
+                        new KeyValue(turnProgressBar.progressProperty(), 0)),
+                new KeyFrame(TURN_DURATION,
+                        new KeyValue(turnProgressBar.progressProperty(), 1))
+        );
+        turnTimer.setOnFinished(e -> handleTurnTimeout());
+
+        // Warning timer
+        warningTimer = new Timeline(
+                new KeyFrame(WARNING_DURATION, e -> showTurnWarning())
+        );
+
+        // Status message fade
+        statusFade = new FadeTransition(Duration.seconds(3), statusLabel);
+        statusFade.setFromValue(1.0);
+        statusFade.setToValue(0.0);
     }
 
     public void initializeNetworkedGame(GameState gameState, GameClient gameClient, String playerId) {
         this.gameClient = gameClient;
         this.playerId = playerId;
         this.isNetworkedGame = true;
+        this.game = gameState.getGame();
 
-        // Initialize the game with the received game state
-        game = gameState.getGame();
+        // Initialize managers
+        initializeManagers(gameState);
 
-        // Set up network event handlers
+        // Setup network handlers
         setupNetworkHandlers();
-        setupChatHandlers();
 
-        // Update the UI
+        // Start game systems
+        startGameSystems();
+
+        // Update view
         updateView();
     }
 
-    private void setupNetworkHandlers() {
-        if (!isNetworkedGame) return;
+    private void initializeManagers(GameState gameState) {
+        moveManager = new GameMoveManager(gameState.getGameId(), gameClient,
+                new GameStateManager(gameClient, playerId));
 
-        // Already implementing GameStateUpdateHandler interface
-        gameClient.setGameHandler(this);
+        turnManager = new TurnManager(gameState.getGameId(), gameClient);
+        turnManager.setTurnHandler(new TurnUpdateHandler());
+
+        scoreSynchronizer = new ScoreSynchronizer(gameState.getGameId(), gameClient);
+        scoreSynchronizer.setUpdateHandler(new ScoreHandler());
+
+        recoveryManager = new NetworkRecoveryManager(gameClient, playerId,
+                new GameStatePersistenceManager(gameState.getGameId(), gameClient));
+        recoveryManager.setRecoveryHandler(new RecoveryHandler());
+
+        endManager = new GameEndManager(gameState.getGameId(), gameClient);
+        endManager.setEndHandler(new GameEndHandler());
+
+        stateSerializer = new GameStateSerializer();
     }
 
-    private void setupChatHandlers() {
+    private void setupNetworkHandlers() {
+        if (gameClient != null) {
+            gameClient.setConnectionHandler(new ConnectionHandler());
+            gameClient.setGameHandler(this);
+        }
+    }
+
+    private void startGameSystems() {
+        scoreSynchronizer.startSync();
+        if (isCurrentPlayer()) {
+            startTurn();
+        }
+    }
+
+    private void startTurn() {
+        turnTimer.playFromStart();
+        warningTimer.playFromStart();
+        enableGameControls();
+        showInfo("Your turn");
+    }
+
+    private void endTurn() {
+        if (!isNetworkedGame || !isCurrentPlayer()) return;
+
+        turnTimer.stop();
+        warningTimer.stop();
+        disableGameControls();
+
+        GameMoveManager.GameMove endTurnMove =
+                GameMoveManager.GameMove.endTurn(playerId);
+
+        if (moveManager.validateAndProcessMove(endTurnMove)) {
+            turnManager.endTurn(playerId);
+        }
+    }
+
+    private void handleTurnTimeout() {
+        if (isCurrentPlayer()) {
+            showAlert("Turn Timeout", "Your turn has ended");
+            endTurn();
+        }
+    }
+
+    private void showTurnWarning() {
+        if (isCurrentPlayer()) {
+            showAlert("Turn Warning", "10 seconds remaining!");
+        }
+    }
+
+    @Override
+    public void handleGameAction(GameAction action) {
         if (!isNetworkedGame) {
-            chatArea.setVisible(false);
+            super.handleGameAction(action);
             return;
         }
 
-        sendChatButton.setOnAction(e -> sendChatMessage());
-        chatInput.setOnAction(e -> sendChatMessage());
+        GameMoveManager.GameMove move = convertActionToMove(action);
+        if (move != null) {
+            moveManager.validateAndProcessMove(move);
+        }
     }
 
-    private void sendChatMessage() {
+        private GameMoveManager.GameMove convertActionToMove(GameAction action) {
+            return switch (action.getType()) {
+                case SELECT_TILES -> GameMoveManager.GameMove.selectTiles(
+                        action.getPlayerId(),
+                        action.getFactoryIndex(),
+                        action.getSelectedColor()
+                );
+                case PLACE_TILES -> GameMoveManager.GameMove.placeTiles(
+                        action.getPlayerId(),
+                        action.getSelectedColor(),
+                        action.getPatternLineIndex()
+                );
+                case END_TURN -> GameMoveManager.GameMove.endTurn(
+                        action.getPlayerId()
+                );
+            };
+        }
+
+    @FXML
+    private void handleTileSelection(Rectangle tileRect, int factoryIndex, TileColor color) {
+        if (!isNetworkedGame || !isCurrentPlayer() || isSelectingTiles) return;
+
+        isSelectingTiles = true;
+        selectedColor = color;
+        selectedFactory = factoryIndex >= 0 ?
+                game.getFactories().get(factoryIndex) : null;
+
+        GameMoveManager.GameMove move = GameMoveManager.GameMove.selectTiles(
+                playerId,
+                factoryIndex,
+                color
+        );
+
+        if (moveManager.validateAndProcessMove(move)) {
+            highlightSelectedTiles(tileRect);
+        } else {
+            isSelectingTiles = false;
+            selectedColor = null;
+            selectedFactory = null;
+            showError("Invalid tile selection");
+        }
+    }
+
+    @FXML
+    private void handlePatternLineSelection(int lineIndex) {
+        if (!isNetworkedGame || !isCurrentPlayer() || !isSelectingTiles) return;
+
+        GameMoveManager.GameMove move = GameMoveManager.GameMove.placeTiles(
+                playerId,
+                selectedColor,
+                lineIndex
+        );
+
+        if (moveManager.validateAndProcessMove(move)) {
+            isSelectingTiles = false;
+            selectedColor = null;
+            selectedFactory = null;
+            clearSelections();
+
+            if (game.getCurrentPlayer().getHand().isEmpty()) {
+                endTurn();
+            }
+        } else {
+            showError("Invalid pattern line selection");
+        }
+    }
+
+    private void highlightSelectedTiles(Rectangle tileRect) {
+        tileRect.setStroke(Color.YELLOW);
+        tileRect.setStrokeWidth(2);
+    }
+
+    private void clearSelections() {
+        factoriesGrid.lookupAll(".tile").forEach(node -> {
+            if (node instanceof Rectangle) {
+                ((Rectangle) node).setStroke(Color.BLACK);
+                ((Rectangle) node).setStrokeWidth(1);
+            }
+        });
+    }
+
+    private boolean isCurrentPlayer() {
+        return game.getCurrentPlayer().getName().equals(playerId);
+    }
+
+    private void enableGameControls() {
+        endTurnButton.setDisable(false);
+        factoriesGrid.setDisable(false);
+        centralArea.setDisable(false);
+        playerBoardsGrid.setDisable(false);
+    }
+
+    private void disableGameControls() {
+        endTurnButton.setDisable(true);
+        factoriesGrid.setDisable(true);
+        centralArea.setDisable(true);
+        playerBoardsGrid.setDisable(true);
+    }
+
+    private void showInfo(String message) {
+        statusLabel.setText(message);
+        statusLabel.setStyle("-fx-text-fill: #2ecc71;");
+        showStatusMessage();
+    }
+
+    private void showError(String message) {
+        statusLabel.setText(message);
+        statusLabel.setStyle("-fx-text-fill: #e74c3c;");
+        showStatusMessage();
+    }
+
+    private void showStatusMessage() {
+        statusFade.stop();
+        statusLabel.setOpacity(1.0);
+        statusFade.playFromStart();
+    }
+
+    private void showAlert(String title, String message) {
+        Platform.runLater(() -> {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setTitle(title);
+            alert.setHeaderText(null);
+            alert.setContentText(message);
+            alert.show();
+        });
+    }
+
+    @Override
+    public void cleanup() {
+        if (turnTimer != null) turnTimer.stop();
+        if (warningTimer != null) warningTimer.stop();
+        if (statusFade != null) statusFade.stop();
+
+        if (moveManager != null) moveManager.clean();
+        if (turnManager != null) turnManager.cleanup();
+        if (scoreSynchronizer != null) scoreSynchronizer.cleanup();
+        if (recoveryManager != null) recoveryManager.cleanup();
+        if (endManager != null) endManager.cleanup();
+        if (stateSerializer != null) stateSerializer.cleanup();
+    }
+
+    // Inner handler classes
+        private class TurnUpdateHandler implements TurnManager.TurnUpdateHandler {
+            @Override
+            public void onTurnStarted(String playerId) {
+                Platform.runLater(() -> {
+                    updateTurnDisplay(playerId);
+                    if (playerId.equals(GameController.this.playerId)) {
+                        startTurn();
+                    } else {
+                        disableGameControls();
+                    }
+                });
+            }
+
+        @Override
+        public void onTurnWarning(String playerId) {
+            if (playerId.equals(GameController.this.playerId)) {
+                showTurnWarning();
+            }
+        }
+
+        @Override
+        public void onTurnResumed(String playerId) {
+            Platform.runLater(() -> {
+                if (playerId.equals(GameController.this.playerId)) {
+                    showInfo("Your turn resumed");
+                    startTurn();
+                } else {
+                    showInfo(playerId + "'s turn resumed");
+                }
+            });
+        }
+
+        @Override
+        public void onPlayerRemoved(String playerId) {
+            Platform.runLater(() -> {
+                showAlert("Player Removed",
+                        "Player " + playerId + " has been removed due to inactivity");
+                updateView();
+            });
+        }
+
+        @Override
+        public void onTurnError(String message) {
+            Platform.runLater(() -> showError(message));
+        }
+    }
+
+    private class ScoreHandler implements ScoreSynchronizer.ScoreUpdateHandler {
+        @Override
+        public void onScoreUpdated(String playerId, int newScore,
+                                   ScoreSynchronizer.ScoreType type, String reason) {
+            Platform.runLater(() -> {
+                updatePlayerScore(playerId, newScore);
+                showInfo(playerId + " scored points: " + reason);
+            });
+        }
+
+        @Override
+        public void onScoreReconciliation(String playerId) {
+            Platform.runLater(() -> {
+                showInfo("Reconciling scores for " + playerId);
+                updateView();
+            });
+        }
+
+        @Override
+        public void onScoreError(String message) {
+            Platform.runLater(() -> showError(message));
+        }
+    }
+
+    private class RecoveryHandler implements NetworkRecoveryManager.RecoveryHandler {
+        @Override
+        public void onPlayerDisconnected(String playerId) {
+            Platform.runLater(() -> {
+                showInfo("Player " + playerId + " disconnected");
+                updatePlayerStatus(playerId, false);
+            });
+        }
+
+        @Override
+        public void onPlayerReconnected(String playerId) {
+            Platform.runLater(() -> {
+                showInfo("Player " + playerId + " reconnected");
+                updatePlayerStatus(playerId, true);
+                updateView();
+            });
+        }
+
+        @Override
+        public void onPlayerPermanentlyDisconnected(String playerId) {
+            Platform.runLater(() -> {
+                showAlert("Player Left",
+                        "Player " + playerId + " has permanently disconnected");
+                handlePermanentDisconnection(playerId);
+            });
+        }
+
+        @Override
+        public void onRecoveryError(String message) {
+            Platform.runLater(() -> showError(message));
+        }
+    }
+
+    private class GameEndHandler implements GameEndManager.GameEndHandler {
+        @Override
+        public void onGameEnd(GameEndManager.FinalGameResult result) {
+            Platform.runLater(() -> showGameResults(result));
+        }
+
+        @Override
+        public void onGameEndError(String message) {
+            Platform.runLater(() -> {
+                showError(message);
+                mainApp.returnToLobby();
+            });
+        }
+    }
+
+    private class ConnectionHandler implements ConnectionStatusHandler {
+        @Override
+        public void onConnected() {
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Connected");
+                connectionStatusLabel.setStyle("-fx-text-fill: #2ecc71;");
+                reconnectionProgress.setVisible(false);
+                enableGameControls();
+            });
+        }
+
+        @Override
+        public void onDisconnected(String reason) {
+            Platform.runLater(() -> {
+                connectionStatusLabel.setText("Disconnected: " + reason);
+                connectionStatusLabel.setStyle("-fx-text-fill: #e74c3c;");
+                reconnectionProgress.setVisible(true);
+                disableGameControls();
+                handleDisconnection();
+            });
+        }
+
+        @Override
+        public void onConnectionFailed(String reason) {
+            Platform.runLater(() -> {
+                showError("Connection failed: " + reason);
+                handleConnectionFailure(reason);
+            });
+        }
+    }
+
+    private void handleDisconnection() {
+        if (isCurrentPlayer()) {
+            turnTimer.pause();
+            warningTimer.pause();
+        }
+
+        recoveryManager.handleDisconnection(playerId)
+                .thenAccept(success -> {
+                    if (!success) {
+                        Platform.runLater(() -> handleConnectionFailure("Recovery failed"));
+                    }
+                });
+    }
+
+    private void handleConnectionFailure(String reason) {
+        showAlert("Connection Error",
+                "Lost connection to the game: " + reason + "\nReturning to lobby...");
+        cleanup();
+        mainApp.returnToLobby();
+    }
+
+    private void handlePermanentDisconnection(String playerId) {
+        removePlayer(playerId);
+        if (game.getPlayers().size() < 2) {
+            showAlert("Game Ended",
+                    "Not enough players to continue. Returning to lobby...");
+            cleanup();
+            mainApp.returnToLobby();
+        } else {
+            updateView();
+        }
+    }
+
+    private void removePlayer(String playerId) {
+        game.getPlayers().removeIf(p -> p.getName().equals(playerId));
+        updatePlayerBoards();
+    }
+
+    private void showGameResults(GameEndManager.FinalGameResult result) {
+        GameResultWindow resultWindow = new GameResultWindow(
+                result.playerScores().stream()
+                        .map(this::createFinalPlayer)
+                        .toList()
+        );
+
+        resultWindow.setOnNewGameRequest(() -> {
+            if (isCurrentPlayer()) {
+                requestNewGame();
+            } else {
+                showInfo("Only the host can start a new game");
+            }
+        });
+
+        resultWindow.setOnExitRequest(() -> {
+            cleanup();
+            mainApp.returnToLobby();
+        });
+
+        resultWindow.show();
+    }
+
+    private Player createFinalPlayer(GameEndManager.PlayerFinalScore score) {
+        Player finalPlayer = new Player(score.playerId());
+        finalPlayer.setScore(score.score());
+        if (score.details() != null) {
+            addScoreDetails(finalPlayer, score.details());
+        }
+        return finalPlayer;
+    }
+
+    private void addScoreDetails(Player player, GameEndManager.ScoreDetails details) {
+        // Add any additional score details to the player object
+        // This could be used for displaying detailed scoring breakdown
+    }
+
+    private void requestNewGame() {
+        GameMessage newGameRequest = new GameMessage(
+                MessageType.NEW_GAME_REQUEST,
+                playerId,
+                null,
+                null
+        );
+        gameClient.sendGameMessage(newGameRequest);
+    }
+
+    @FXML
+    private void handleChatSend() {
         if (!chatInput.getText().trim().isEmpty()) {
-            GameMessage chatMessage = new GameMessage(
-                    MessageType.CHAT,
-                    playerId,
-                    null,
-                    null,
-                    chatInput.getText()
-            );
-            gameClient.sendGameMessage(chatMessage);
+            sendChatMessage(chatInput.getText().trim());
             chatInput.clear();
         }
     }
 
-    private void setupNewRoundButton() {
-        newRoundButton.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white;");
-        newRoundButton.setOnAction(event -> startNewRound());
+    private void sendChatMessage(String message) {
+        GameMessage chatMessage = new GameMessage(
+                MessageType.CHAT,
+                playerId,
+                null,
+                null,
+                message
+        );
+        gameClient.sendGameMessage(chatMessage);
     }
 
-    private void startNewRound() {
-        game.endRound();
-        for (Player player : game.getPlayers()) {
-            player.startNewTurn();
-        }
-        updateView();
-        showAlert("New Round", "A new round has been started!");
+    @Override
+    public void onGameStateUpdate(GameState newState) {
+        Platform.runLater(() -> {
+            game = newState.getGame();
+            updateView();
+            endManager.checkGameEnd(game);
+        });
+    }
+
+    @Override
+    public void onGameMove(GameAction action) {
+        Platform.runLater(() -> {
+            handleGameAction(action);
+            updateView();
+        });
+    }
+
+    @Override
+    public void onChatMessage(String senderId, String message) {
+        Platform.runLater(() -> {
+            if (chatDisplay != null) {
+                chatDisplay.appendText(
+                        String.format("[%s] %s: %s%n",
+                                getFormattedTime(),
+                                senderId,
+                                message
+                        )
+                );
+                chatDisplay.setScrollTop(Double.MAX_VALUE);
+            }
+        });
+    }
+
+    @Override
+    public void onPlayerStatusChange(String playerId, boolean joined) {
+        Platform.runLater(() -> {
+            String status = joined ? "joined" : "left";
+            showInfo("Player " + playerId + " has " + status + " the game");
+            updatePlayerStatus(playerId, joined);
+        });
     }
 
     private void updateView() {
-        updateCurrentPlayerLabel();
         updateFactories();
         updateCentralArea();
         updatePlayerBoards();
         updatePlayerHand();
-    }
-
-    private void updateCurrentPlayerLabel() {
-        currentPlayerLabel.setText("Current Player: " + game.getCurrentPlayer().getName());
+        updateTurnDisplay(game.getCurrentPlayer().getName());
+        updateScores();
     }
 
     private void updateFactories() {
         factoriesGrid.getChildren().clear();
         List<Factory> factories = game.getFactories();
+
         int row = 0, col = 0;
         for (int i = 0; i < factories.size(); i++) {
             Factory factory = factories.get(i);
             StackPane factoryPane = createFactoryPane(factory, i);
             factoriesGrid.add(factoryPane, col, row);
+
             col++;
             if (col > 2) {
                 col = 0;
@@ -150,143 +679,33 @@ public class GameController implements GameStateUpdateHandler {
         }
     }
 
-    private StackPane createFactoryPane(Factory factory, int factoryIndex) {
-        StackPane factoryPane = new StackPane();
-        factoryPane.setPrefSize(100, 100);
-        Rectangle background = new Rectangle(100, 100, Color.LIGHTGRAY);
-        factoryPane.getChildren().add(background);
+    private StackPane createFactoryPane(Factory factory, int index) {
+        StackPane pane = new StackPane();
+        pane.setPrefSize(100, 100);
+        pane.getStyleClass().add("factory-pane");
 
-        FlowPane tilesPane = new FlowPane();
-        tilesPane.setHgap(5);
-        tilesPane.setVgap(5);
+        FlowPane tilesPane = new FlowPane(5, 5);
+        tilesPane.setPrefWrapLength(90);
 
         for (Tile tile : factory.getTiles()) {
             Rectangle tileRect = createTileRectangle(tile.getColor());
-            int finalFactoryIndex = factoryIndex;
-            tileRect.setOnMouseClicked(event -> onTileSelected(finalFactoryIndex, tile.getColor()));
+            final int factoryIndex = index;
+            tileRect.setOnMouseClicked(e ->
+                    handleTileSelection(tileRect, factoryIndex, tile.getColor()));
             tilesPane.getChildren().add(tileRect);
         }
 
-        factoryPane.getChildren().add(tilesPane);
-        return factoryPane;
-    }
-
-    private void updateCentralArea() {
-        centralArea.getChildren().clear();
-        for (Tile tile : game.getCentralArea().getTiles()) {
-            Rectangle tileRect = createTileRectangle(tile.getColor());
-            tileRect.setOnMouseClicked(event -> onTileSelected(-1, tile.getColor()));
-            centralArea.getChildren().add(tileRect);
-        }
-    }
-
-    private void updatePlayerBoards() {
-        playerBoardsGrid.getChildren().clear();
-        List<Player> players = game.getPlayers();
-        for (int i = 0; i < players.size(); i++) {
-            Player player = players.get(i);
-            GridPane playerBoard = createPlayerBoard(player);
-            playerBoardsGrid.add(playerBoard, i % 2, i / 2);
-        }
-    }
-
-    private GridPane createPlayerBoard(Player player) {
-        GridPane playerBoard = new GridPane();
-        playerBoard.setHgap(5);
-        playerBoard.setVgap(5);
-        playerBoard.setPadding(new Insets(10));
-
-        // Add player name and score
-        Label nameLabel = new Label(player.getName() + " - Score: " + player.getScore());
-        playerBoard.add(nameLabel, 0, 0, 6, 1);
-
-        // Add pattern lines
-        for (int i = 0; i < 5; i++) {
-            addPatternLine(playerBoard, player, i);
-        }
-
-        // Add wall
-        addWall(playerBoard, player.getWall());
-
-        // Add negative line
-        addNegativeLine(playerBoard, player);
-
-        return playerBoard;
-    }
-
-    private void addPatternLine(GridPane playerBoard, Player player, int row) {
-        List<Tile> patternLine = player.getPatternLines().getLine(row);
-        for (int j = 0; j <= row; j++) {
-            Rectangle tileRect = new Rectangle(20, 20);
-            if (j < patternLine.size()) {
-                tileRect.setFill(getTileColor(patternLine.get(j).getColor()));
-                tileRect.setStroke(Color.BLACK);
-                tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
-            } else {
-                tileRect.setFill(Color.WHITE.deriveColor(0, 1, 0.5, 1));
-                tileRect.setStroke(Color.GRAY);
-                tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
-            }
-            int finalRow = row;
-            tileRect.setOnMouseClicked(event -> onPatternLineClicked(player, finalRow));
-            playerBoard.add(tileRect, j, row + 1);
-        }
-    }
-
-    private void addWall(GridPane playerBoard, Wall wall) {
-        for (int i = 0; i < 5; i++) {
-            for (int j = 0; j < 5; j++) {
-                Rectangle tileRect = new Rectangle(20, 20);
-                if (wall.hasTile(i, j)) {
-                    tileRect.setFill(getTileColor(wall.getTileColor(i, j)));
-                    tileRect.setStroke(Color.BLACK);
-                    tileRect.setStrokeWidth(WALL_TILE_BORDER_WIDTH);
-                    tileRect.setStyle("-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 2, 0, 0, 1);");
-                } else {
-                    TileColor wallPatternColor = Wall.getWallPatternColor(i, j);
-                    Color emptyColor = getTileColor(wallPatternColor).deriveColor(0, 1, 0.5, 0.3);
-                    tileRect.setFill(emptyColor);
-                    tileRect.setStroke(Color.GRAY);
-                    tileRect.setStrokeWidth(REGULAR_TILE_BORDER_WIDTH);
-                }
-                playerBoard.add(tileRect, j + 6, i + 1);
-            }
-        }
-    }
-
-    private void addNegativeLine(GridPane playerBoard, Player player) {
-        FlowPane negativeLine = new FlowPane();
-        negativeLine.setHgap(2);
-        for (Tile tile : player.getNegativeLine()) {
-            Rectangle tileRect = createTileRectangle(tile.getColor());
-            negativeLine.getChildren().add(tileRect);
-        }
-        playerBoard.add(negativeLine, 0, 6, 11, 1);
-
-        Label negativeLineLabel = new Label("Negative Line: " + player.getNegativeLine().size() + " tiles");
-        playerBoard.add(negativeLineLabel, 0, 7, 11, 1);
-    }
-
-    private void updatePlayerHand() {
-        playerHandArea.getChildren().clear();
-        Map<TileColor, Integer> hand = game.getCurrentPlayer().getHand();
-        for (Map.Entry<TileColor, Integer> entry : hand.entrySet()) {
-            TileColor color = entry.getKey();
-            int count = entry.getValue();
-            StackPane tileStack = new StackPane();
-            Rectangle tileRect = createTileRectangle(color);
-            Label countLabel = new Label(String.valueOf(count));
-            countLabel.setStyle("-fx-font-weight: bold;");
-            tileStack.getChildren().addAll(tileRect, countLabel);
-            playerHandArea.getChildren().add(tileStack);
-        }
+        pane.getChildren().add(tilesPane);
+        return pane;
     }
 
     private Rectangle createTileRectangle(TileColor color) {
-        Rectangle tileRect = new Rectangle(20, 20);
-        tileRect.setFill(getTileColor(color));
-        tileRect.setStroke(Color.BLACK);
-        return tileRect;
+        Rectangle rect = new Rectangle(20, 20);
+        rect.setFill(getTileColor(color));
+        rect.setStroke(Color.BLACK);
+        rect.setStrokeWidth(1);
+        rect.getStyleClass().add("tile");
+        return rect;
     }
 
     private Color getTileColor(TileColor color) {
@@ -296,312 +715,85 @@ public class GameController implements GameStateUpdateHandler {
             case YELLOW -> Color.YELLOW;
             case BLACK -> Color.BLACK;
             case WHITE -> Color.WHITE;
-            default -> Color.GRAY;
         };
     }
 
-    private void onTileSelected(int factoryIndex, TileColor color) {
-        if (isNetworkedGame && !isCurrentPlayer()) {
-            showAlert("Not Your Turn", "Please wait for your turn");
-            return;
-        }
+    private void updateCentralArea() {
+        centralArea.getChildren().clear();
 
-        Player currentPlayer = game.getCurrentPlayer();
-        if (currentPlayer.hasSelectedThisTurn()) {
-            showAlert("Invalid move", "You have already selected tiles this turn!");
-            return;
-        }
-
-        Factory selectedFactory = factoryIndex == -1 ? null : game.getFactories().get(factoryIndex);
-        boolean success = game.takeTurn(currentPlayer, selectedFactory, color, -1);
-
-        if (!success) {
-            showAlert("Invalid move", "Unable to select tiles!");
-            return;
-        }
-
-        if (isNetworkedGame) {
-            // Send move to other players
-            GameAction action = new GameAction(
-                    GameAction.ActionType.SELECT_TILES,
-                    factoryIndex,
-                    color,
-                    -1
-            );
-            sendGameAction(action);
-        }
-
-        updateView();
-    }
-
-    private void onPatternLineClicked(Player player, int lineIndex) {
-        if (isNetworkedGame && !isCurrentPlayer()) {
-            showAlert("Not Your Turn", "Please wait for your turn");
-            return;
-        }
-
-        if (player != game.getCurrentPlayer()) {
-            showAlert("Invalid move", "It's not your turn!");
-            return;
-        }
-
-        Map<TileColor, Integer> hand = player.getHand();
-        if (hand.isEmpty()) {
-            showAlert("Invalid move", "You don't have any tiles in your hand!");
-            return;
-        }
-
-        TileColor colorToPlace = hand.keySet().iterator().next();
-
-        if (player.getWall().isColorCompleted(colorToPlace)) {
-            showAlert("Invalid move", "This color is already completed in your wall!");
-            return;
-        }
-
-        if (!player.getWall().canPlaceTile(colorToPlace, lineIndex)) {
-            showAlert("Invalid move", "You can't place this color in this row!");
-            return;
-        }
-
-        boolean placed = player.placeTilesFromHand(colorToPlace, lineIndex);
-
-        if (!placed) {
-            showAlert("Invalid move", "You can't place these tiles in this line!");
-            return;
-        }
-
-        if (isNetworkedGame) {
-            // Send move to other players
-            GameAction action = new GameAction(
-                    GameAction.ActionType.PLACE_TILES,
-                    -1,
-                    colorToPlace,
-                    lineIndex
-            );
-            sendGameAction(action);
-        }
-
-        updateView();
-        if (player.getHand().isEmpty()) {
-            game.endTurn();
-            updateView();
-            checkGameEnd();
+        for (Tile tile : game.getCentralArea().getTiles()) {
+            Rectangle tileRect = createTileRectangle(tile.getColor());
+            tileRect.setOnMouseClicked(e ->
+                    handleTileSelection(tileRect, -1, tile.getColor()));
+            centralArea.getChildren().add(tileRect);
         }
     }
 
-    private void sendGameAction(GameAction action) {
-        GameMessage message = new GameMessage(
-                MessageType.MOVE,
-                playerId,
-                action,
-                new GameState(game)
-        );
-        gameClient.sendGameMessage(message);
+    private void updatePlayerBoards() {
+        playerBoardsGrid.getChildren().clear();
+        List<Player> players = game.getPlayers();
+
+        for (int i = 0; i < players.size(); i++) {
+            GridPane playerBoard = createPlayerBoard(players.get(i));
+            playerBoardsGrid.add(playerBoard, i % 2, i / 2);
+        }
     }
 
-    private boolean isCurrentPlayer() {
-        return game.getCurrentPlayer().getName().equals(playerId);
-    }
+    private GridPane createPlayerBoard(Player player) {
+        GridPane board = new GridPane();
+        board.setHgap(5);
+        board.setVgap(5);
+        board.setPadding(new Insets(10));
+        board.getStyleClass().add("player-board");
 
-    private void showAlert(String title, String content) {
-        Alert alert = new Alert(Alert.AlertType.WARNING);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(content);
-        alert.showAndWait();
-    }
+        // Player name and score
+        Label nameLabel = new Label(player.getName());
+        nameLabel.getStyleClass().add("player-name");
+        board.add(nameLabel, 0, 0, 2, 1);
 
-    @FXML
-    private void onEndTurn() {
-        if (isNetworkedGame && !isCurrentPlayer()) {
-            showAlert("Not Your Turn", "Please wait for your turn");
-            return;
+        // Pattern lines
+        for (int i = 0; i < 5; i++) {
+            addPatternLine(board, player, i);
         }
 
-        game.endTurn();
-        if (game.isRoundEnd()) {
-            game.endRound();
-        }
+        // Wall
+        addWall(board, player.getWall());
 
-        if (isNetworkedGame) {
-            GameAction action = new GameAction(
-                    GameAction.ActionType.END_TURN,
-                    -1,
-                    null,
-                    -1
-            );
-            sendGameAction(action);
-        }
+        // Negative line
+        addNegativeLine(board, player);
 
-        updateView();
-        checkGameEnd();
+        return board;
     }
 
-    @FXML
-    private void onSaveGame() {
-        // TODO: Implement save game functionality with network state
-        if (isNetworkedGame) {
-            showAlert("Save Game", "Saving networked games is not yet implemented!");
-            return;
-        }
-        showAlert("Save Game", "Game saved successfully!");
-    }
-
-    @FXML
-    private void onLoadGame() {
-        // TODO: Implement load game functionality with network state
-        if (isNetworkedGame) {
-            showAlert("Load Game", "Loading networked games is not yet implemented!");
-            return;
-        }
-        showAlert("Load Game", "Game loaded successfully!");
-        updateView();
-    }
-
-    private void checkGameEnd() {
-        if (game.isGameEnded()) {
-            GameResultWindow resultWindow = new GameResultWindow(game.getPlayers());
-
-            resultWindow.setOnNewGameRequest(() -> {
-                if (isNetworkedGame) {
-                    // Handle networked new game request
-                    showAlert("New Game", "Starting a new networked game...");
-                    // TODO: Implement networked new game logic
-                } else {
-                    initializeGame();
-                    updateView();
+    private void updatePlayerStatus(String playerId, boolean connected) {
+        playerBoardsGrid.getChildren().forEach(node -> {
+            if (node instanceof GridPane board) {
+                Label nameLabel = (Label) board.lookup(".player-name");
+                if (nameLabel != null &&
+                        nameLabel.getText().equals(playerId)) {
+                    board.setOpacity(connected ? 1.0 : 0.5);
                 }
-            });
-
-            resultWindow.setOnExitRequest(() -> {
-                if (isNetworkedGame) {
-                    // Clean up network resources
-                    cleanup();
-                }
-//                // Return to main menu or lobby
-//                try {
-//                    //mainApp.showLobbyScreen();
-////                } catch (IOException e) {
-////                    showAlert("Error", "Failed to return to lobby: " + e.getMessage());
-////                }
-            });
-
-            resultWindow.show();
-        }
-    }
-
-    // GameStateUpdateHandler implementation
-    @Override
-    public void onGameStateUpdate(GameState newState) {
-        Platform.runLater(() -> {
-            game = newState.getGame();
-            updateView();
-        });
-    }
-
-    @Override
-    public void onGameMove(GameAction action) {
-        Platform.runLater(() -> {
-            processNetworkMove(action);
-            updateView();
-        });
-    }
-
-    @Override
-    public void onChatMessage(String senderId, String message) {
-        Platform.runLater(() -> {
-            if (chatDisplay != null) {
-                chatDisplay.appendText(String.format("%s: %s\n", senderId, message));
             }
         });
     }
 
-    @Override
-    public void onPlayerStatusChange(String playerId, boolean joined) {
-        Platform.runLater(() -> {
-            String message = joined ? "joined" : "left";
-            showAlert("Player Status", "Player " + playerId + " has " + message + " the game");
-            if (!joined) {
-                handlePlayerDisconnection(playerId);
-            }
-        });
+    private String getFormattedTime() {
+        return java.time.LocalTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
     }
 
-    @Override
-    public String getCurrentPlayerId() {
-        return playerId;
+    // Setters
+    public void setStage(Stage stage) {
+        this.stage = stage;
     }
 
-    private void processNetworkMove(GameAction action) {
-        if (action == null) return;
-
-        switch (action.getType()) {
-            case SELECT_TILES:
-                handleNetworkTileSelection(action);
-                break;
-            case PLACE_TILES:
-                handleNetworkTilePlacement(action);
-                break;
-            case END_TURN:
-                handleNetworkEndTurn();
-                break;
-        }
-    }
-
-    private void handleNetworkTileSelection(GameAction action) {
-        Player currentPlayer = game.getCurrentPlayer();
-        Factory selectedFactory = action.getFactoryIndex() == -1 ?
-                null : game.getFactories().get(action.getFactoryIndex());
-        game.takeTurn(currentPlayer, selectedFactory, action.getSelectedColor(), -1);
-    }
-
-    private void handleNetworkTilePlacement(GameAction action) {
-        Player currentPlayer = game.getCurrentPlayer();
-        currentPlayer.placeTilesFromHand(action.getSelectedColor(), action.getPatternLineIndex());
-    }
-
-    private void handleNetworkEndTurn() {
-        game.endTurn();
-        if (game.isRoundEnd()) {
-            game.endRound();
-        }
-    }
-
-    private void handlePlayerDisconnection(String disconnectedPlayerId) {
-        // Handle player disconnection
-        // For now, just show an alert
-        showAlert("Player Disconnected",
-                "Player " + disconnectedPlayerId + " has disconnected from the game");
-
-        // In a more sophisticated implementation, you might want to:
-        // 1. Pause the game
-        // 2. Wait for reconnection
-        // 3. Save the game state
-        // 4. Return to lobby if too many players disconnect
-    }
-
-
-
-    public void cleanup() {
-        if (isNetworkedGame && gameClient != null) {
-            // Send a leave message before disconnecting
-            GameMessage leaveMessage = new GameMessage(
-                    MessageType.LEAVE,
-                    playerId,
-                    null,
-                    null
-            );
-            gameClient.sendGameMessage(leaveMessage);
-        }
+    public void setMainApp(AzulApplication mainApp) {
+        this.mainApp = mainApp;
     }
 
     public void setGame(Game game) {
         this.game = game;
         updateView();
     }
-
-    public void onTurnEnd() {
-        updateView();
-        checkGameEnd();
-    }
 }
+

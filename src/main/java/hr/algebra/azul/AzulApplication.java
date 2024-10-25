@@ -14,10 +14,13 @@ import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class AzulApplication extends Application {
     private static final Logger LOGGER = Logger.getLogger(AzulApplication.class.getName());
+    private static final long CONNECTION_TIMEOUT = 10000; // 10 seconds
 
     private Stage primaryStage;
     private GameClient gameClient;
@@ -25,6 +28,8 @@ public class AzulApplication extends Application {
     private LobbyController lobbyController;
     private Scene lobbyScene;
     private Scene gameScene;
+    private boolean isConnecting = false;
+    private CompletableFuture<Boolean> connectionFuture;
 
     @Override
     public void start(Stage stage) throws IOException {
@@ -48,9 +53,9 @@ public class AzulApplication extends Application {
             public void onConnected() {
                 Platform.runLater(() -> {
                     LOGGER.info("Connected to server");
-                    showAlert("Connection Status",
-                            "Connected to server",
-                            Alert.AlertType.INFORMATION);
+                    if (isConnecting && connectionFuture != null && !connectionFuture.isDone()) {
+                        connectionFuture.complete(true);
+                    }
                 });
             }
 
@@ -58,9 +63,11 @@ public class AzulApplication extends Application {
             public void onDisconnected(String reason) {
                 Platform.runLater(() -> {
                     LOGGER.warning("Disconnected: " + reason);
-                    showAlert("Connection Status",
-                            "Disconnected: " + reason,
-                            Alert.AlertType.WARNING);
+                    if (!reason.equals("Client disconnected")) {
+                        showAlert("Connection Status",
+                                "Disconnected: " + reason,
+                                Alert.AlertType.WARNING);
+                    }
                     handleDisconnection();
                 });
             }
@@ -69,37 +76,40 @@ public class AzulApplication extends Application {
             public void onConnectionFailed(String reason) {
                 Platform.runLater(() -> {
                     LOGGER.severe("Connection failed: " + reason);
-                    showAlert("Connection Status",
-                            "Connection failed: " + reason,
-                            Alert.AlertType.ERROR);
+                    if (isConnecting && connectionFuture != null && !connectionFuture.isDone()) {
+                        connectionFuture.complete(false);
+                    }
                 });
             }
         });
 
-        // Connect to server
-        // TODO: This is a bug a error
-        // Connected to the target VM, address: '127.0.0.1:1660', transport: 'socket'
-        //lis 22, 2024 12:47:22 PM hr.algebra.azul.AzulApplication lambda$initializeNetworkConnection$1
-        //INFO: Successfully connected to server
-        //lis 22, 2024 12:47:23 PM hr.algebra.azul.AzulApplication$1 lambda$onConnected$0
-        //INFO: Connected to server
-        //lis 22, 2024 12:47:26 PM hr.algebra.azul.AzulApplication$1 lambda$onDisconnected$1
-        //WARNING: Disconnected: Connection lost: Read timed out
-        gameClient.connect().thenAccept(success -> {
-            Platform.runLater(() -> {
-                if (success) {
-                    LOGGER.info("Successfully connected to server");
-                    showAlert("Connection Status",
-                            "Successfully connected to server",
-                            Alert.AlertType.INFORMATION);
-                } else {
-                    LOGGER.severe("Failed to connect to server");
-                    showAlert("Connection Status",
-                            "Failed to connect to server",
+        // Connect to server with timeout
+        isConnecting = true;
+        connectionFuture = new CompletableFuture<>();
+        
+        gameClient.connect()
+            .orTimeout(CONNECTION_TIMEOUT, TimeUnit.MILLISECONDS)
+            .exceptionally(throwable -> {
+                Platform.runLater(() -> {
+                    String errorMsg = throwable.getCause() instanceof java.util.concurrent.TimeoutException ?
+                            "Connection timed out" : throwable.getMessage();
+                    LOGGER.severe("Connection error: " + errorMsg);
+                    showAlert("Connection Error",
+                            "Failed to establish connection: " + errorMsg,
                             Alert.AlertType.ERROR);
+                });
+                return false;
+            })
+            .thenAccept(success -> {
+                isConnecting = false;
+                if (!success) {
+                    Platform.runLater(() -> {
+                        showAlert("Connection Failed",
+                                "Could not connect to server",
+                                Alert.AlertType.ERROR);
+                    });
                 }
             });
-        });
     }
 
     private void showLobbyScreen() throws IOException {
@@ -109,7 +119,6 @@ public class AzulApplication extends Application {
         // Get and initialize the lobby controller
         lobbyController = loader.getController();
         lobbyController.setMainApp(this);
-        lobbyController.setStage(primaryStage);
         gameClient.setLobbyHandler(lobbyController);
         lobbyController.initializeWithClient(gameClient);
 
@@ -125,7 +134,6 @@ public class AzulApplication extends Application {
         // Get and initialize the game controller
         gameController = loader.getController();
         gameController.setMainApp(this);
-        gameController.setStage(primaryStage);
         gameClient.setGameHandler(gameController);
         gameController.initializeNetworkedGame(gameState, gameClient, lobbyController.getPlayerId());
 
@@ -145,7 +153,7 @@ public class AzulApplication extends Application {
 
     private void handleDisconnection() {
         if (gameController != null) {
-            //gameController.handleDisconnection();
+            gameController.cleanup();
         }
         returnToLobby();
     }
@@ -177,6 +185,9 @@ public class AzulApplication extends Application {
         }
         if (gameClient != null) {
             gameClient.disconnect();
+        }
+        if (connectionFuture != null && !connectionFuture.isDone()) {
+            connectionFuture.cancel(true);
         }
     }
 
