@@ -37,21 +37,13 @@ public class GameController implements GameStateUpdateHandler {
     // Network components
     private GameClient gameClient;
     private String playerId;
-    private boolean isNetworkedGame;
-
-    // Managers
-    private GameMoveManager moveManager;
+    private boolean isNetworkedGame = false;
     private TurnManager turnManager;
-    private ScoreSynchronizer scoreSynchronizer;
-    private NetworkRecoveryManager recoveryManager;
-    private GameEndManager endManager;
-    private GameStateSerializer stateSerializer;
+    private NetworkGameState networkGameState;
+    private MultiplayerGameManager gameManager;
 
-    // Application components
-    private Stage stage;
-    private AzulApplication mainApp;
-
-    // UI Components
+    @FXML private Label turnTimerLabel;
+    @FXML private Label currentPlayerLabel;
     @FXML private GridPane factoriesGrid;
     @FXML private FlowPane centralArea;
     @FXML private GridPane playerBoardsGrid;
@@ -71,15 +63,82 @@ public class GameController implements GameStateUpdateHandler {
     @FXML private Label connectionStatusLabel;
     @FXML private ProgressBar reconnectionProgress;
 
-    // Animations
-    private Timeline turnTimer;
-    private Timeline warningTimer;
-    private FadeTransition statusFade;
+    private void initializeTurnBasedGame() {
+        turnManager = new TurnManager(
+                unused -> handleTurnTimeout(),
+                remainingTime -> updateTurnTimer(remainingTime)
+        );
 
-    @FXML
-    public void initialize() {
-        setupUI();
-        setupAnimations();
+        // Initialize turn timer label
+        turnTimerLabel = new Label();
+        turnTimerLabel.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");
+        // Add turnTimerLabel to your UI (update your FXML)
+
+        if (isNetworkedGame && gameClient != null) {
+            networkGameState = new NetworkGameState(new GameState(game));
+            if (isCurrentPlayer()) {
+                startPlayerTurn();
+            }
+        }
+    }
+
+    private void startPlayerTurn() {
+        if (!isNetworkedGame) return;
+
+        Platform.runLater(() -> {
+            turnManager.startTurn();
+            showAlert("Your Turn", "You have 30 seconds to make your move!");
+        });
+    }
+
+    private void handleTurnTimeout() {
+        if (!isNetworkedGame) return;
+
+        // Force end the current turn
+        GameAction timeoutAction = new GameAction(
+                GameAction.ActionType.END_TURN,
+                -1,
+                null,
+                -1
+        );
+        sendGameAction(timeoutAction);
+        endTurnInternal();
+    }
+
+    private void updateTurnTimer(int remainingSeconds) {
+        Platform.runLater(() -> {
+            turnTimerLabel.setText(String.format("Time remaining: %ds", remainingSeconds));
+            if (remainingSeconds <= 5) {
+                turnTimerLabel.setStyle("-fx-text-fill: red; -fx-font-size: 16px; -fx-font-weight: bold;");
+            }
+        });
+    }
+
+    private void endTurnInternal() {
+        turnManager.endTurn();
+        game.endTurn();
+        if (game.isRoundEnd()) {
+            game.endRound();
+        }
+        updateView();
+
+        // Send updated game state to other players
+        if (isNetworkedGame) {
+            GameState newState = new GameState(game);
+            GameMessage syncMessage = new GameMessage(
+                    MessageType.SYNC,
+                    playerId,
+                    null,
+                    newState
+            );
+            gameClient.sendGameMessage(syncMessage);
+        }
+    }
+
+
+    // Setters for stage and main application
+    public void setStage(Stage stage) {
+        this.stage = stage;
     }
 
     private void setupUI() {
@@ -119,25 +178,36 @@ public class GameController implements GameStateUpdateHandler {
         this.isNetworkedGame = true;
         this.game = gameState.getGame();
 
-        // Initialize managers
-        initializeManagers(gameState);
+        // Initialize multiplayer manager
+        gameManager = new MultiplayerGameManager(
+                gameClient,
+                playerId,
+                gameState.getConnectedPlayers()
+        );
 
-        // Setup network handlers
+        // Set up callbacks
+        gameManager.setOnStateUpdate(this::handleGameStateUpdate);
+        gameManager.setOnPlayerTimeout(this::handlePlayerTimeout);
+        gameManager.setOnTurnTick(this::updateTurnTimer);
+        gameManager.setOnTurnTimeout(unused -> handleTurnTimeout());
+
+        // Start multiplayer management
+        gameManager.start();
+
+        // Initialize UI
         setupNetworkHandlers();
-
-        // Start game systems
-        startGameSystems();
-
-        // Update view
+        setupChatHandlers();
         updateView();
     }
 
-    private void initializeManagers(GameState gameState) {
-        moveManager = new GameMoveManager(gameState.getGameId(), gameClient,
-                new GameStateManager(gameClient, playerId));
 
-        turnManager = new TurnManager(gameState.getGameId(), gameClient);
-        turnManager.setTurnHandler(new TurnUpdateHandler());
+
+    private void setupNetworkHandlers() {
+        if (!isNetworkedGame) return;
+
+        // Already implementing GameStateUpdateHandler interface/////////////////////////////////////////////////////////////////
+        gameClient.setGameHandler(this);
+    }////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         scoreSynchronizer = new ScoreSynchronizer(gameState.getGameId(), gameClient);
         scoreSynchronizer.setUpdateHandler(new ScoreHandler());
@@ -614,6 +684,9 @@ public class GameController implements GameStateUpdateHandler {
     public void onGameStateUpdate(GameState newState) {
         Platform.runLater(() -> {
             game = newState.getGame();
+            if (isCurrentPlayer()) {
+                startPlayerTurn();
+            }
             updateView();
             endManager.checkGameEnd(game);
         });
@@ -665,17 +738,17 @@ public class GameController implements GameStateUpdateHandler {
         factoriesGrid.getChildren().clear();
         List<Factory> factories = game.getFactories();
 
-        int row = 0, col = 0;
-        for (int i = 0; i < factories.size(); i++) {
-            Factory factory = factories.get(i);
-            StackPane factoryPane = createFactoryPane(factory, i);
-            factoriesGrid.add(factoryPane, col, row);
-
-            col++;
-            if (col > 2) {
-                col = 0;
-                row++;
-            }
+        switch (action.getType()) {
+            case SELECT_TILES:
+                handleNetworkTileSelection(action);
+                break;
+            case PLACE_TILES:
+                handleNetworkTilePlacement(action);
+                break;
+            case END_TURN:
+                handleNetworkEndTurn();
+                turnManager.endTurn();
+                break;
         }
     }
 

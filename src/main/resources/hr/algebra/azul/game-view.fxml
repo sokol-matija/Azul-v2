@@ -15,19 +15,55 @@
                 <Insets top="10" right="10" bottom="10" left="10"/>
             </padding>
 
-            <HBox spacing="10" alignment="CENTER_LEFT">
-                <Label fx:id="currentPlayerLabel" style="-fx-font-size: 16px;"/>
+            <!-- Game Status Bar -->
+            <HBox spacing="20" alignment="CENTER_LEFT" style="-fx-background-color: #f8f9fa; -fx-padding: 10; -fx-background-radius: 5;">
+                <!-- Current Player Info -->
+                <VBox spacing="5">
+                    <Label text="Current Player" style="-fx-font-size: 12px; -fx-text-fill: #6c757d;"/>
+                    <Label fx:id="currentPlayerLabel" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+                </VBox>
+
+                <!-- Separator -->
+                <Separator orientation="VERTICAL"/>
+
+                <!-- Turn Timer -->
+                <VBox spacing="5">
+                    <Label text="Turn Timer" style="-fx-font-size: 12px; -fx-text-fill: #6c757d;"/>
+                    <Label fx:id="turnTimerLabel" style="-fx-font-size: 16px; -fx-font-weight: bold;"/>
+                </VBox>
+
+                <!-- Separator -->
+                <Separator orientation="VERTICAL"/>
+
+                <!-- Connection Status -->
+                <VBox spacing="5">
+                    <Label text="Connection Status" style="-fx-font-size: 12px; -fx-text-fill: #6c757d;"/>
+                    <Label fx:id="connectionStatus" style="-fx-font-size: 14px;"/>
+                </VBox>
+
+                <!-- Spacer -->
                 <Region HBox.hgrow="ALWAYS"/>
-                <Label fx:id="connectionStatus" style="-fx-font-size: 14px;"/>
-                <Button fx:id="hostGameButton" text="Host Game"/>
-                <Button fx:id="joinGameButton" text="Join Game"/>
+
+                <!-- Game Controls -->
+                <HBox spacing="10" alignment="CENTER">
+                    <Button fx:id="hostGameButton" text="Host Game"
+                            style="-fx-background-color: #007bff; -fx-text-fill: white;"/>
+                    <Button fx:id="joinGameButton" text="Join Game"
+                            style="-fx-background-color: #28a745; -fx-text-fill: white;"/>
+                </HBox>
             </HBox>
 
-            <HBox spacing="10">
-                <Button fx:id="saveGameButton" text="Save Game"/>
-                <Button fx:id="loadGameButton" text="Load Game"/>
-                <Button fx:id="endTurnButton" text="End Turn"/>
-                <Button fx:id="newRoundButton" text="New Round"/>
+            <!-- Action Buttons Bar -->
+            <HBox spacing="10" style="-fx-padding: 5;">
+                <Button fx:id="saveGameButton" text="Save Game"
+                        style="-fx-background-color: #6c757d; -fx-text-fill: white;"/>
+                <Button fx:id="loadGameButton" text="Load Game"
+                        style="-fx-background-color: #6c757d; -fx-text-fill: white;"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="endTurnButton" text="End Turn"
+                        style="-fx-background-color: #dc3545; -fx-text-fill: white;"/>
+                <Button fx:id="newRoundButton" text="New Round"
+                        style="-fx-background-color: #17a2b8; -fx-text-fill: white;"/>
             </HBox>
         </VBox>
     </top>
@@ -58,11 +94,14 @@
                 </padding>
 
                 <Label text="Chat" style="-fx-font-size: 14px;"/>
-                <TextArea fx:id="chatDisplay" VBox.vgrow="ALWAYS"/>
+                <TextArea fx:id="chatDisplay" VBox.vgrow="ALWAYS" editable="false"
+                          wrapText="true" style="-fx-font-family: 'System';"/>
 
                 <HBox spacing="5">
-                    <TextField fx:id="chatInput" HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="sendChatButton" text="Send"/>
+                    <TextField fx:id="chatInput" HBox.hgrow="ALWAYS"
+                               promptText="Type your message..."/>
+                    <Button fx:id="sendChatButton" text="Send"
+                            style="-fx-background-color: #007bff; -fx-text-fill: white;"/>
                 </HBox>
             </VBox>
         </SplitPane>
