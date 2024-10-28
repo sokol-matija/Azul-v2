@@ -9,6 +9,7 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Logger;
 
 public class GameServer {
@@ -21,8 +22,12 @@ public class GameServer {
     private volatile boolean running = true;
 
     public GameServer() {
-        this.lobbyManager = new LobbyManager();
+        this.lobbyManager = new LobbyManager(this);
     }
+
+//    public GameServer(ScheduledExecutorService executorService) {
+//        this.lobbyManager = new LobbyManager(executorService);
+//    }
 
     public List<ClientHandler> getClients() {
         return new ArrayList<>(clients);

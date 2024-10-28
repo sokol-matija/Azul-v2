@@ -10,6 +10,7 @@ public class LobbyMessage implements Serializable {
     private LobbyMessageType type;
     private GameLobby lobby;
     private GameState gameState;
+    private String errorMessage;
 
     public LobbyMessage(LobbyMessageType type, GameLobby lobby) {
         this.type = type;
@@ -22,8 +23,14 @@ public class LobbyMessage implements Serializable {
         this.gameState = gameState;
     }
 
+    public LobbyMessage(LobbyMessageType type, GameLobby lobby, String errorMessage) {
+        this.type = type;
+        this.lobby = lobby;
+        this.errorMessage = errorMessage;
+    }
     // Getters
     public LobbyMessageType getType() { return type; }
     public GameLobby getLobby() { return lobby; }
     public GameState getGameState() { return gameState; }
+    public String getErrorMessage() { return errorMessage; }
 }

@@ -5,39 +5,34 @@ import java.io.Serializable;
 public class GameMessage implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    private MessageType type;
-    private String playerId;
-    private GameAction action;
-    private GameState gameState;
-    private String chatContent;  // For chat messages
+    private final MessageType type;
+    private final String playerId;
+    private final GameAction action;
+    private final GameState gameState;
+    private final String chatContent;
 
     public GameMessage(MessageType type, String playerId, GameAction action, GameState gameState) {
         this.type = type;
         this.playerId = playerId;
         this.action = action;
         this.gameState = gameState;
+        this.chatContent = null;
     }
 
-    public GameMessage(MessageType type, String playerId, GameAction action, GameState gameState, String chatContent) {
-        this(type, playerId, action, gameState);
+    public GameMessage(MessageType type, String playerId, String chatContent) {
+        this.type = type;
+        this.playerId = playerId;
+        this.action = null;
+        this.gameState = null;
         this.chatContent = chatContent;
     }
 
     // Getters and setters
     public MessageType getType() { return type; }
-    public void setType(MessageType type) { this.type = type; }
-
     public String getPlayerId() { return playerId; }
-    public void setPlayerId(String playerId) { this.playerId = playerId; }
-
     public GameAction getAction() { return action; }
-    public void setAction(GameAction action) { this.action = action; }
-
     public GameState getGameState() { return gameState; }
-    public void setGameState(GameState gameState) { this.gameState = gameState; }
-
     public String getChatContent() { return chatContent; }
-    public void setChatContent(String chatContent) { this.chatContent = chatContent; }
 
     @Override
     public String toString() {
@@ -46,7 +41,7 @@ public class GameMessage implements Serializable {
         }
         return "GameMessage{" +
                 "type=" + type +
-                ", playerId='" + playerId + '\'' +
+                ", User='" + playerId + '\'' +
                 ", action=" + action +
                 ", gameState=" + gameState +
                 '}';

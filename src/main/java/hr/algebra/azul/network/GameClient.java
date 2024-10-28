@@ -1,6 +1,7 @@
 // File: src/main/java/hr/algebra/azul/network/GameClient.java
 package hr.algebra.azul.network;
 
+import hr.algebra.azul.model.User;
 import hr.algebra.azul.network.lobby.*;
 import hr.algebra.azul.network.server.LobbyMessage;
 import javafx.application.Platform;
@@ -34,6 +35,11 @@ public class GameClient {
 
     private String clientId;
     private GameLobby currentLobby;
+    private User currentUser;
+
+    public void setCurrentUser(User user) {
+        this.currentUser = user;
+    }
 
     public GameClient(String host, int port) {
         this.host = host;
@@ -171,7 +177,7 @@ public class GameClient {
                     gameHandler.onGameStateUpdate(message.getGameState());
                     break;
                 case CHAT:
-                    gameHandler.onChatMessage(message.getPlayerId(), message.toString());
+                    gameHandler.onChatMessage(message.getPlayerId(), message.getChatContent());
                     break;
                 case JOIN:
                 case LEAVE:

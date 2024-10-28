@@ -99,8 +99,6 @@ public class GameController implements GameStateUpdateHandler {
             GameMessage chatMessage = new GameMessage(
                     MessageType.CHAT,
                     playerId,
-                    null,
-                    null,
                     chatInput.getText()
             );
             gameClient.sendGameMessage(chatMessage);

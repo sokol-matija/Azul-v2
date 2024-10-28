@@ -6,5 +6,6 @@ public enum MessageType {
     SYNC,
     JOIN,
     LEAVE,
-    PING
+    PING,
+    ERROR
 }

@@ -3,6 +3,7 @@ package hr.algebra.azul;
 
 import hr.algebra.azul.controller.GameController;
 import hr.algebra.azul.controller.LobbyController;
+import hr.algebra.azul.model.User;
 import hr.algebra.azul.network.*;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -14,10 +15,18 @@ import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.Random;
 import java.util.logging.Logger;
 
 public class AzulApplication extends Application {
     private static final Logger LOGGER = Logger.getLogger(AzulApplication.class.getName());
+    private static final String[] RANDOM_ADJECTIVES = {
+            "Happy", "Lucky", "Clever", "Swift", "Bright", "Nimble", "Quick", "Sharp", "Smart", "Wise"
+    };
+    private static final String[] RANDOM_NOUNS = {
+            "Player", "Gamer", "Master", "Champion", "Warrior", "Knight", "Hero", "Legend", "Star", "Winner"
+    };
+
 
     private Stage primaryStage;
     private GameClient gameClient;
@@ -25,6 +34,7 @@ public class AzulApplication extends Application {
     private LobbyController lobbyController;
     private Scene lobbyScene;
     private Scene gameScene;
+    private User currentUser;
 
     @Override
     public void start(Stage stage) throws IOException {
@@ -34,22 +44,38 @@ public class AzulApplication extends Application {
             handleApplicationClose();
         });
 
+        // Create random user before initializing network
+        createRandomUser();
+
         initializeNetworkConnection();
         showLobbyScreen();
     }
 
+    private void createRandomUser() {
+        Random random = new Random();
+        String adjective = RANDOM_ADJECTIVES[random.nextInt(RANDOM_ADJECTIVES.length)];
+        String noun = RANDOM_NOUNS[random.nextInt(RANDOM_NOUNS.length)];
+        String randomNumber = String.format("%03d", random.nextInt(1000));
+
+        String username = adjective + noun + randomNumber;
+        this.currentUser = new User(username);
+
+        LOGGER.info("Created new user: " + username);
+    }
+
     private void initializeNetworkConnection() {
-        // Create client instance
         gameClient = new GameClient(NetworkConfig.DEFAULT_HOST, NetworkConfig.DEFAULT_PORT);
 
-        // Set up connection handler
+        // Set the current user in the game client
+        gameClient.setCurrentUser(currentUser);
+
         gameClient.setConnectionHandler(new ConnectionStatusHandler() {
             @Override
             public void onConnected() {
                 Platform.runLater(() -> {
-                    LOGGER.info("Connected to server");
+                    LOGGER.info("Connected to server as: " + currentUser.getUsername());
                     showAlert("Connection Status",
-                            "Connected to server",
+                            "Connected to server as: " + currentUser.getUsername(),
                             Alert.AlertType.INFORMATION);
                 });
             }
@@ -76,21 +102,12 @@ public class AzulApplication extends Application {
             }
         });
 
-        // Connect to server
-        // TODO: This is a bug a error
-        // Connected to the target VM, address: '127.0.0.1:1660', transport: 'socket'
-        //lis 22, 2024 12:47:22 PM hr.algebra.azul.AzulApplication lambda$initializeNetworkConnection$1
-        //INFO: Successfully connected to server
-        //lis 22, 2024 12:47:23 PM hr.algebra.azul.AzulApplication$1 lambda$onConnected$0
-        //INFO: Connected to server
-        //lis 22, 2024 12:47:26 PM hr.algebra.azul.AzulApplication$1 lambda$onDisconnected$1
-        //WARNING: Disconnected: Connection lost: Read timed out
         gameClient.connect().thenAccept(success -> {
             Platform.runLater(() -> {
                 if (success) {
-                    LOGGER.info("Successfully connected to server");
+                    LOGGER.info("Successfully connected to server as: " + currentUser.getUsername());
                     showAlert("Connection Status",
-                            "Successfully connected to server",
+                            "Successfully connected as: " + currentUser.getUsername(),
                             Alert.AlertType.INFORMATION);
                 } else {
                     LOGGER.severe("Failed to connect to server");
@@ -102,19 +119,16 @@ public class AzulApplication extends Application {
         });
     }
 
-    private void showLobbyScreen() throws IOException {
+    public void showLobbyScreen() throws IOException {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("lobby-view.fxml"));
-        lobbyScene = new Scene(loader.load(), 800, 600);
+        Scene scene = new Scene(loader.load(), 800, 600);
 
-        // Get and initialize the lobby controller
-        lobbyController = loader.getController();
-        lobbyController.setMainApp(this);
-        lobbyController.setStage(primaryStage);
-        gameClient.setLobbyHandler(lobbyController);
-        lobbyController.initializeWithClient(gameClient);
+        LobbyController controller = loader.getController();
+        controller.setMainApp(this); // This will now trigger proper initialization
+        controller.initializeWithClient(gameClient);
 
-        primaryStage.setTitle("Azul - Game Lobby");
-        primaryStage.setScene(lobbyScene);
+        primaryStage.setTitle("Azul Lobby - " + currentUser.getUsername());
+        primaryStage.setScene(scene);
         primaryStage.show();
     }
 
@@ -192,6 +206,14 @@ public class AzulApplication extends Application {
 
     public Stage getPrimaryStage() {
         return primaryStage;
+    }
+
+    public User getCurrentUser() {
+        return currentUser;
+    }
+
+    public void setCurrentUser(User user) {
+        this.currentUser = user;
     }
 
     public static void main(String[] args) {
